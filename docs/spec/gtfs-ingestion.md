@@ -38,6 +38,7 @@ Typed tables, integer surrogate keys (TTC `stop_id`/`trip_id`/`route_id` are num
 - `stop_times(trip_id, stop_id, stop_sequence, arr INT, dep INT)` — only essential columns
 - `calendar`, `calendar_dates`
 - **`pathways`, `levels`** — from Dataset B, for the subway in-station interchange graph
+- **`transfers(from_stop_id, to_stop_id, min_walk_seconds, type)`** — **synthesized at ingest** (ticket 009), the manufactured `transfers.txt`: `station` (shared parent_station), `pathway` (from B's pathways/levels), `street` (proximity ≤ ~250 m, haversine ÷ ~1.3 m/s). Indexed on `from_stop_id`; consumed by `plan_trip`.
 - **shapes: excluded from v1** (no tool consumes geometry; trivially addable later for a frontend)
 
 Indexes: `stop_times(stop_id, dep)`, `stop_times(trip_id, stop_sequence)`, `trips(route_id)`, `stops(stop_code)`, `calendar_dates(service_id, date)`, plus `pathways` interchange lookups.
@@ -51,7 +52,7 @@ Both resolved via CKAN `package_show` → `resources[0].url` / `.last_modified` 
 
 ### 4. Ingest pipeline
 
-A Node ingest script (`scripts/ingest.ts`): downloads both ZIPs → **streams** the CSVs (stop_times is 4.2 M rows — must stream, never load in memory) → builds the optimized libSQL DB → syncs to Turso (remote) or writes the local file (Docker build). Same script drives both CI refresh and the Docker image build.
+A Node ingest script (`scripts/ingest.ts`): downloads both ZIPs → **streams** the CSVs (stop_times is 4.2 M rows — must stream, never load in memory) → builds the optimized libSQL DB → **generates the synthetic `transfers` table** (station/pathway/street derivation, ticket 009) → syncs to Turso (remote) or writes the local file (Docker build). Same script drives both CI refresh and the Docker image build.
 
 ### 5. Refresh model — scheduled cron + change poll
 

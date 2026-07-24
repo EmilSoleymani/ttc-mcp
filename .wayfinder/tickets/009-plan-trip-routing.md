@@ -2,7 +2,7 @@
 id: "009"
 title: "Grilling: plan_trip — Multi-modal Transfer Routing"
 type: grilling
-status: open
+status: resolved
 blocked_by: ["005", "006", "007", "008"]
 blocks: []
 ---
@@ -24,3 +24,13 @@ Decisions needed:
 **Deliverable:** an ADR + `docs/spec/plan-trip.md` in the repo. Resolving this reaches the map's destination.
 
 ## Answer
+
+Grilled 2026-07-23. **The capstone — resolving it reaches the map's destination.** [ADR 0001](../../docs/adr/0001-plan-trip-sql-schedule-walking.md) + full spec [docs/spec/plan-trip.md](../../docs/spec/plan-trip.md).
+
+- **Routing approach: SQL schedule-walking (ADR-0003 style)** — a bounded RAPTOR-lite transfer-composition ladder over the Turso query layer. Keeps both hosting targets first-class, reuses ticket 006 directly, matches the go-planner precedent. Rejected: external engine (breaks architecture) and in-process RAPTOR (Docker-only in-memory timetable).
+- **Transfer model: precompute a synthetic `transfers` table at ingest** — `station` (shared parent_station) + `pathway` (Dataset B pathways/levels) + `street` (proximity ≤250 m). The manufactured `transfers.txt`; fast indexed lookups, no request-time geo-scans. **Ripples to ticket 006 ingest (transfers-generation step + `transfers` table) — gtfs-ingestion.md updated.**
+- **Realtime awareness: static schedule only for v1.** Deterministic, ships cleanly; RT-aware routing documented as future.
+- **Tool contract:** `plan_trip({from, to, when?, arrive_by?, max_transfers?, modes?, max_itineraries?})` → `{from, to, itineraries[], candidates?}` with transit/transfer legs, ISO 8601 Toronto times, ambiguous-endpoint → candidates-as-success. `arrive_by` emulated. Ships the reserved **`plan_a_trip`** prompt.
+- **Scope guard:** multi-agency GO+TTC routing, deep walking-network routing, and per-itinerary fare computation are **out of scope** (future backend / not v1).
+
+**→ Map destination reached: the complete TTC-MCP spec + research handoff is done.**
