@@ -1,0 +1,10 @@
+.env
+node_modules/
+dist/
+coverage/
+docker-compose.override.yml
+
+# GTFS data artifacts (fetched/derived at build time; regenerable, not committed)
+data/*.zip
+data/*.db
+data/gtfs/
