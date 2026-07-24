@@ -2,7 +2,7 @@
 id: "008"
 title: "Grilling: GTFS-RT Real-time Integration & Cache Deltas"
 type: grilling
-status: open
+status: resolved
 blocked_by: ["001", "005"]
 blocks: ["009"]
 ---
@@ -23,3 +23,12 @@ Decisions needed:
 **Deliverable:** `docs/spec/realtime-integration.md` in the repo; feed the protobuf decision back to ticket 004's dependency delta.
 
 ## Answer
+
+Grilled 2026-07-23. Full spec: [`../../docs/spec/realtime-integration.md`](../../docs/spec/realtime-integration.md).
+
+- **Decoder: `gtfs-realtime-bindings`** (official MobilityData bindings) → concretizes the stack-baseline "protobuf dependency" delta.
+- **Caching (delta from go-planner never-cache): short coalescing TTL** — decode each feed ≤ once per `RT_CACHE_TTL_SECONDS` (default 25s), build in-memory indexes (`stop→arrivals`, `route→vehicles`), serve tool calls from them. Honors `CACHE_ENABLED`; in-process per-instance (full on Docker, best-effort on Vercel warm). **ADR-0001 retry applies unchanged.**
+- **Feed→tool:** VehiclePositions→`get_vehicles` (drop empty-route_id deadheads; subway route → `unsupported` empty+note); TripUpdates→`get_arrivals` (predicted epoch→ISO, join trip_id→catalog); Alerts→`get_alerts` (filter by informed_entity + derived category, subway-inclusive).
+- **Unified `get_arrivals` fallback finalized:** detect stop `mode`; subway (or any stop with no live trips in window) → serve scheduled from the ticket-007 `get_schedule` path, `realtime:false`/`source:"scheduled"`. Always answers.
+- **Arrival DTO finalized:** `{route_id, route_short_name, headsign, direction_id, time, realtime, source, delay_seconds?}`; `delay_seconds` computed only when scheduled time resolvable.
+- **Static↔RT join risk flagged:** RT `trip_id` assumed-but-not-guaranteed to match static; spec'd a first-impl validation + a fallback that never drops an arrival on an unmatched trip_id.
