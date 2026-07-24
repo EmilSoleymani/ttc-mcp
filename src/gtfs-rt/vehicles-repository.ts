@@ -1,14 +1,21 @@
-import { transit_realtime } from "gtfs-realtime-bindings";
+// gtfs-realtime-bindings is a CommonJS module whose named exports are
+// assigned dynamically at runtime, so cjs-module-lexer can't detect
+// `transit_realtime` as a named export — go through the default for the
+// runtime value (see rt-client.ts for the full explanation).
+import GtfsRealtimeBindings from "gtfs-realtime-bindings";
+import type { transit_realtime } from "gtfs-realtime-bindings";
 import type Long from "long";
 
 import type { Vehicle } from "../schemas/vehicle.js";
+
+const { transit_realtime: GtfsRt } = GtfsRealtimeBindings;
 
 const TORONTO_TZ = "America/Toronto";
 
 // The runtime enum protobufjs generates is a plain object with both the
 // forward (name -> number) and reverse (number -> name) mapping, so this
 // indexes straight into it rather than hand-maintaining a parallel table.
-const OCCUPANCY_STATUS_NAMES = transit_realtime.VehiclePosition
+const OCCUPANCY_STATUS_NAMES = GtfsRt.VehiclePosition
   .OccupancyStatus as unknown as Record<number, string>;
 
 function occupancyStatusName(

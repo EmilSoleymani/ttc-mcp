@@ -1,6 +1,17 @@
-import { transit_realtime } from "gtfs-realtime-bindings";
+// gtfs-realtime-bindings is a CommonJS module whose named exports are
+// assigned dynamically at runtime (not a static `module.exports = {...}`
+// literal), so cjs-module-lexer can't detect `transit_realtime` as a named
+// export — a real Node ESM `import { transit_realtime } from
+// "gtfs-realtime-bindings"` throws at runtime despite type-checking fine.
+// Go through the default (guaranteed = the whole `module.exports`) for the
+// runtime value; the type-only import is unaffected (erased at compile time,
+// reads the .d.ts directly regardless of the module's runtime shape).
+import GtfsRealtimeBindings from "gtfs-realtime-bindings";
+import type { transit_realtime } from "gtfs-realtime-bindings";
 
 import { fetchWithRetry, type RetryOptions } from "./http.js";
+
+const { transit_realtime: GtfsRt } = GtfsRealtimeBindings;
 
 export const DEFAULT_RT_BASE_URL = "https://bustime.ttc.ca/gtfsrt";
 export const DEFAULT_RT_CACHE_TTL_SECONDS = 25;
@@ -61,7 +72,7 @@ export class RtClient {
       );
     }
     const buffer = new Uint8Array(await response.arrayBuffer());
-    return transit_realtime.FeedMessage.decode(buffer);
+    return GtfsRt.FeedMessage.decode(buffer);
   }
 
   /** Decoded feed, served from the coalescing cache when enabled. */

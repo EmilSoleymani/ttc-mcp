@@ -1,4 +1,5 @@
-import { transit_realtime } from "gtfs-realtime-bindings";
+// See rt-client.ts for why this goes through the default export.
+import GtfsRealtimeBindings from "gtfs-realtime-bindings";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -6,6 +7,8 @@ import {
   toVehicle,
   vehiclesForRoute,
 } from "./vehicles-repository.js";
+
+const { transit_realtime } = GtfsRealtimeBindings;
 
 describe("toTorontoIso", () => {
   it("formats a summer (EDT) timestamp with a -04:00 offset", () => {

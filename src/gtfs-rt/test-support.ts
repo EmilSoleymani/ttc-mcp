@@ -1,6 +1,10 @@
-import { transit_realtime } from "gtfs-realtime-bindings";
+// See rt-client.ts for why this goes through the default export.
+import GtfsRealtimeBindings from "gtfs-realtime-bindings";
+import type { transit_realtime } from "gtfs-realtime-bindings";
 
 import { RtClient, type RtClientOptions } from "./rt-client.js";
+
+const { transit_realtime: GtfsRt } = GtfsRealtimeBindings;
 
 /** An RtClient backed by a fake `fetchImpl`, for tests that don't exercise
  * live GTFS-RT data at all — caching disabled, any fetch call is a test bug. */
@@ -29,10 +33,10 @@ export interface FixtureVehicle {
 export function encodeVehiclePositionsFeed(
   vehicles: FixtureVehicle[],
 ): Uint8Array {
-  const message = transit_realtime.FeedMessage.create({
+  const message = GtfsRt.FeedMessage.create({
     header: {
       gtfsRealtimeVersion: "2.0",
-      incrementality: transit_realtime.FeedHeader.Incrementality.FULL_DATASET,
+      incrementality: GtfsRt.FeedHeader.Incrementality.FULL_DATASET,
       timestamp: Math.floor(Date.now() / 1000),
     },
     entity: vehicles.map((v, i) => ({
@@ -53,7 +57,7 @@ export function encodeVehiclePositionsFeed(
       },
     })),
   });
-  return transit_realtime.FeedMessage.encode(message).finish();
+  return GtfsRt.FeedMessage.encode(message).finish();
 }
 
 /** An RtClient whose `vehicles` feed fetch resolves to the given fixture
