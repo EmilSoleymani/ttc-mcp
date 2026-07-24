@@ -17,6 +17,7 @@ describe("schedule repository", () => {
     const result = await getSchedule(client, {
       stopId: 663,
       when: new Date("2026-07-24T10:00:00-04:00"),
+      limit: 1,
     });
     expect(result?.stop).toMatchObject({ stop_id: "663" });
     expect(result?.departures).toEqual([
@@ -28,7 +29,10 @@ describe("schedule repository", () => {
         scheduled_time: "2026-07-25T06:20:00-04:00",
       },
     ]);
-    expect(result?.truncated).toBe(false);
+    // The fixture's service runs daily, so the day after also has a match —
+    // confirming the anti-dump cap still applies once the lookahead finds
+    // more candidates than requested.
+    expect(result?.truncated).toBe(true);
   });
 
   it("aggregates a station's platforms, tagging each with platform_stop_id", async () => {
@@ -123,9 +127,10 @@ describe("schedule repository", () => {
     const offDate = await getSchedule(client, {
       stopId: 662,
       routeId: 900,
-      // Far enough from 2026-07-25 that it falls outside the +-1-day
-      // search window, so the added service can't leak in from either side.
-      when: new Date("2026-07-20T00:00:00-04:00"),
+      // Far enough from 2026-07-25 that it falls outside the extended
+      // lookahead window too (not just the base +-1-day window), so the
+      // added service can't leak in via the forward search either.
+      when: new Date("2026-07-01T00:00:00-04:00"),
     });
     expect(offDate?.departures.some((d) => d.headsign === "Special")).toBe(
       false,
@@ -154,5 +159,67 @@ describe("schedule repository", () => {
     await expect(
       getSchedule(client, { stopId: 999_999, when: new Date() }),
     ).resolves.toBeUndefined();
+  });
+
+  it("extends the search forward when the base window has a real calendar gap (e.g. a board-period transition)", async () => {
+    // Mirrors a real-world TTC GTFS quirk: a board period's calendar.txt can
+    // start a couple of days in the future relative to "today", leaving a
+    // genuine gap with zero active service in the immediate +-1-day window.
+    await client.execute({
+      sql: `INSERT INTO routes (route_id, route_short_name, route_long_name, route_type, route_color)
+            VALUES (700, '700', 'Gap Test Route', 3, NULL)`,
+    });
+    await client.execute({
+      sql: `INSERT INTO calendar (service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date)
+            VALUES (700, 1, 1, 1, 1, 1, 1, 1, 20260726, 20260905)`,
+    });
+    await client.execute({
+      sql: `INSERT INTO trips (trip_id, route_id, service_id, trip_headsign, direction_id, shape_id)
+            VALUES (7, 700, 700, 'Gap Route', 0, NULL)`,
+    });
+    await client.execute({
+      sql: `INSERT INTO stop_times (trip_id, stop_id, stop_sequence, arr, dep)
+            VALUES (7, 663, 1, 28800, 28800)`,
+    });
+
+    const result = await getSchedule(client, {
+      stopId: 663,
+      routeId: 700,
+      when: new Date("2026-07-24T10:00:00-04:00"),
+    });
+    expect(result?.departures[0]).toMatchObject({
+      route_id: "700",
+      scheduled_time: "2026-07-26T08:00:00-04:00",
+    });
+    expect(result?.hint).toContain("next available service day");
+  });
+
+  it("reports no service found when the entire lookahead window has none", async () => {
+    await client.execute({
+      sql: `INSERT INTO routes (route_id, route_short_name, route_long_name, route_type, route_color)
+            VALUES (701, '701', 'Far Future Route', 3, NULL)`,
+    });
+    await client.execute({
+      sql: `INSERT INTO calendar (service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date)
+            VALUES (701, 1, 1, 1, 1, 1, 1, 1, 20261001, 20261231)`,
+    });
+    await client.execute({
+      sql: `INSERT INTO trips (trip_id, route_id, service_id, trip_headsign, direction_id, shape_id)
+            VALUES (8, 701, 701, 'Far Future', 0, NULL)`,
+    });
+    await client.execute({
+      sql: `INSERT INTO stop_times (trip_id, stop_id, stop_sequence, arr, dep)
+            VALUES (8, 663, 1, 28800, 28800)`,
+    });
+
+    const result = await getSchedule(client, {
+      stopId: 663,
+      routeId: 701,
+      when: new Date("2026-07-24T10:00:00-04:00"),
+    });
+    expect(result?.departures).toEqual([]);
+    expect(result?.hint).toBe(
+      "No scheduled service found in the next 14 days.",
+    );
   });
 });

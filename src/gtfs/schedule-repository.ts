@@ -148,10 +148,17 @@ function toStopSummaryOnly(detail: StopDetail): StopSummary {
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 20;
-// The next-N search window around `when`'s service date: covers a
+// The base next-N search window around `when`'s service date: covers a
 // GTFS-encoded post-midnight trip belonging to yesterday's service_id, and
 // tomorrow's first trips when nothing is left to run tonight.
-const CANDIDATE_DAY_OFFSETS = [-1, 0, 1];
+const BACKWARD_DAY_OFFSET = -1;
+const BASE_FORWARD_DAY_OFFSET = 1;
+// If the base window has zero active service at all — e.g. a GTFS
+// board-period transition (or an upstream publishing outage) that leaves a
+// multi-day gap with no calendar coverage — keep looking forward up to this
+// many days so "next departures" doesn't go silent during the gap. Bounded
+// to keep the pathological case (a stop with no service at all) cheap.
+const MAX_LOOKAHEAD_DAYS = 14;
 
 export interface GetScheduleParams {
   stopId: number;
@@ -168,7 +175,10 @@ export interface GetScheduleResult {
 }
 
 /** Next-N scheduled departures at a stop (or, for a station, aggregated
- * across its child platforms), from `when` onward. */
+ * across its child platforms), from `when` onward. Searches a base +/-1-day
+ * window first; if that window has no active service at all, extends the
+ * search forward (bounded by `MAX_LOOKAHEAD_DAYS`) so a multi-day calendar
+ * gap doesn't silently produce an empty result. */
 export async function getSchedule(
   client: Client,
   params: GetScheduleParams,
@@ -187,28 +197,44 @@ export async function getSchedule(
 
   const when = params.when ?? new Date();
   const today = serviceDateAt(when);
+  const limit = Math.min(params.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
 
+  // Matches found within the base [-1, +1] window, tracked separately from
+  // the extended lookahead below — this is what distinguishes "there was a
+  // real multi-day service gap" from "this is just a low-frequency stop and
+  // we kept reading extra days to fill the requested page size".
+  let baseWindowMatchCount = 0;
   const withAbsolute: { row: RawDeparture; absolute: Date }[] = [];
-  for (const offset of CANDIDATE_DAY_OFFSETS) {
+  for (
+    let offset = BACKWARD_DAY_OFFSET;
+    offset <= MAX_LOOKAHEAD_DAYS;
+    offset++
+  ) {
     const date = addDays(today, offset);
     const serviceIds = await activeServiceIds(client, date);
-    if (serviceIds.length === 0) continue;
-    const rows = await fetchDepartureRows(
-      client,
-      platformIds,
-      serviceIds,
-      params.routeId,
-    );
-    for (const row of rows) {
-      const absolute = absoluteTimeFor(date, row.dep);
-      if (absolute.getTime() >= when.getTime()) {
-        withAbsolute.push({ row, absolute });
+    if (serviceIds.length > 0) {
+      const rows = await fetchDepartureRows(
+        client,
+        platformIds,
+        serviceIds,
+        params.routeId,
+      );
+      for (const row of rows) {
+        const absolute = absoluteTimeFor(date, row.dep);
+        if (absolute.getTime() >= when.getTime()) {
+          withAbsolute.push({ row, absolute });
+          if (offset <= BASE_FORWARD_DAY_OFFSET) baseWindowMatchCount++;
+        }
       }
+    }
+    // Once the base window is fully evaluated, stop as soon as there's
+    // enough to fill the page — no need to keep reading further-out days.
+    if (offset >= BASE_FORWARD_DAY_OFFSET && withAbsolute.length > limit) {
+      break;
     }
   }
   withAbsolute.sort((a, b) => a.absolute.getTime() - b.absolute.getTime());
 
-  const limit = Math.min(params.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
   const truncated = withAbsolute.length > limit;
   const departures = withAbsolute
     .slice(0, limit)
@@ -220,12 +246,22 @@ export async function getSchedule(
       ),
     );
 
+  const hintParts: string[] = [];
+  if (baseWindowMatchCount === 0) {
+    hintParts.push(
+      departures.length > 0
+        ? "No scheduled service found in the next day from `when`; showing the next available service day (the ingested GTFS calendar may have a gap — see docs/spec/gtfs-ingestion.md's refresh model)."
+        : `No scheduled service found in the next ${String(MAX_LOOKAHEAD_DAYS)} days.`,
+    );
+  }
+  if (truncated && params.routeId === undefined) {
+    hintParts.push("Narrow with route_id to see fewer results.");
+  }
+
   return {
     stop,
     departures,
     truncated,
-    ...(truncated && params.routeId === undefined
-      ? { hint: "Narrow with route_id to see fewer results." }
-      : {}),
+    ...(hintParts.length > 0 ? { hint: hintParts.join(" ") } : {}),
   };
 }

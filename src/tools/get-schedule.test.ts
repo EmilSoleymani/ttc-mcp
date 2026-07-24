@@ -21,7 +21,7 @@ describe("get_schedule", () => {
   it("returns the next departures at a stop", async () => {
     const result = await callTool(
       "get_schedule",
-      { stop_id: "663", when: "2026-07-24T10:00:00-04:00" },
+      { stop_id: "663", when: "2026-07-24T10:00:00-04:00", limit: 1 },
       deps,
     );
     expect(result.isError).toBe(false);
