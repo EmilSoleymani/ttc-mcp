@@ -1,15 +1,28 @@
+import { createClient } from "@libsql/client";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
-import { buildServer } from "../server.js";
+import { applySchema } from "../gtfs/schema.js";
+import { buildServer, type ServerDeps } from "../server.js";
 
 export interface CallToolOutcome {
   isError: boolean;
   structuredContent: unknown;
 }
 
-async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
-  const server = buildServer();
+/** An empty (schema-only) in-memory db — enough for tools/resources that
+ * don't exercise GTFS data (get_fare, ttc://fares). */
+async function defaultDeps(): Promise<ServerDeps> {
+  const db = createClient({ url: ":memory:" });
+  await applySchema(db);
+  return { db };
+}
+
+async function withClient<T>(
+  fn: (client: Client) => Promise<T>,
+  deps?: ServerDeps,
+): Promise<T> {
+  const server = buildServer(deps ?? (await defaultDeps()));
   const client = new Client({ name: "test-client", version: "0.0.0" });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -29,6 +42,7 @@ async function withClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
 export async function callTool(
   toolName: string,
   args: Record<string, unknown>,
+  deps?: ServerDeps,
 ): Promise<CallToolOutcome> {
   return withClient(async (client) => {
     // Populates the SDK's per-tool output-schema validator cache (cached from
@@ -40,12 +54,13 @@ export async function callTool(
       isError: result.isError === true,
       structuredContent: result.structuredContent,
     };
-  });
+  }, deps);
 }
 
 /** Reads an MCP resource over a real in-memory client/server pair. */
 export async function readResource(
   uri: string,
+  deps?: ServerDeps,
 ): Promise<{ uri: string; mimeType?: string; text: string }[]> {
   return withClient(async (client) => {
     const result = await client.readResource({ uri });
@@ -54,5 +69,5 @@ export async function readResource(
       mimeType?: string;
       text: string;
     }[];
-  });
+  }, deps);
 }
