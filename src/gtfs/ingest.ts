@@ -6,6 +6,11 @@ import { gtfsTimeToSeconds, toInt, toReal } from "./transform.js";
 export const DEFAULT_SCHEDULES_URL =
   "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/7795b45e-e65a-4465-81fc-c36b9dfff169/resource/cfb6b2b8-6191-41e3-bda1-b175c51148cb/download/opendata_ttc_schedules.zip";
 
+/** Dataset B — "merged-gtfs-ttc-routes-and-schedules" (quarterly). Only its
+ * pathways.txt/levels.txt are used — everything else is Dataset A's job. */
+export const DEFAULT_MERGED_URL =
+  "https://ckan0.cf.opendata.inter.prod-toronto.ca/dataset/b811ead4-6eaf-4adb-8408-d389fb5a069c/resource/c920e221-7a1c-488b-8c5b-6d8cd4e85eaf/download/completegtfs.zip";
+
 export type CsvRow = Record<string, string | undefined>;
 
 export interface TableSpec {
@@ -125,6 +130,43 @@ export const TABLE_SPECS: readonly TableSpec[] = [
       toInt(r.stop_sequence),
       gtfsTimeToSeconds(r.arrival_time),
       gtfsTimeToSeconds(r.departure_time),
+    ],
+  },
+];
+
+// Dataset B files → the pathways/levels tables (#5's subway interchange
+// graph). levels first: harmless either order since neither FKs the other.
+export const MERGED_TABLE_SPECS: readonly TableSpec[] = [
+  {
+    table: "levels",
+    file: "levels.txt",
+    columns: ["level_id", "level_index", "level_name"],
+    mapRow: (r) => [
+      r.level_id ?? null,
+      toReal(r.level_index),
+      r.level_name ?? null,
+    ],
+  },
+  {
+    table: "pathways",
+    file: "pathways.txt",
+    columns: [
+      "pathway_id",
+      "from_stop_id",
+      "to_stop_id",
+      "pathway_mode",
+      "is_bidirectional",
+      "traversal_time",
+      "length",
+    ],
+    mapRow: (r) => [
+      r.pathway_id ?? null,
+      toInt(r.from_stop_id),
+      toInt(r.to_stop_id),
+      toInt(r.pathway_mode),
+      toInt(r.is_bidirectional),
+      toInt(r.traversal_time),
+      toReal(r.length),
     ],
   },
 ];

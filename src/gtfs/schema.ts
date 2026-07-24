@@ -4,6 +4,9 @@ import type { Client } from "@libsql/client";
 // surrogate keys, integer seconds-since-midnight times, essential columns
 // only. transfers/pathways/levels are added by later slices (#5, #10).
 export const SCHEMA_STATEMENTS: readonly string[] = [
+  "DROP TABLE IF EXISTS transfers",
+  "DROP TABLE IF EXISTS pathways",
+  "DROP TABLE IF EXISTS levels",
   "DROP TABLE IF EXISTS stop_times",
   "DROP TABLE IF EXISTS trips",
   "DROP TABLE IF EXISTS calendar_dates",
@@ -59,6 +62,30 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
   "CREATE INDEX ix_st_stop_dep ON stop_times(stop_id, dep)",
   "CREATE INDEX ix_st_trip_seq ON stop_times(trip_id, stop_sequence)",
   "CREATE INDEX ix_cd_service_date ON calendar_dates(service_id, date)",
+  // Dataset B (pathways/levels) — subway in-station interchange graph.
+  `CREATE TABLE levels (
+     level_id TEXT PRIMARY KEY,
+     level_index REAL,
+     level_name TEXT
+   )`,
+  `CREATE TABLE pathways (
+     pathway_id TEXT,
+     from_stop_id INTEGER NOT NULL,
+     to_stop_id INTEGER NOT NULL,
+     pathway_mode INTEGER,
+     is_bidirectional INTEGER,
+     traversal_time INTEGER,
+     length REAL
+   )`,
+  // The synthesized transfers table (#5) — the missing transfers.txt,
+  // generated at ingest from station/pathway/street derivation.
+  `CREATE TABLE transfers (
+     from_stop_id INTEGER NOT NULL,
+     to_stop_id INTEGER NOT NULL,
+     min_walk_seconds INTEGER NOT NULL,
+     type TEXT NOT NULL
+   )`,
+  "CREATE INDEX ix_transfers_from ON transfers(from_stop_id)",
 ];
 
 /** Drops and recreates the schedule schema (full-rebuild ingest). */
