@@ -27,16 +27,22 @@ export function registerSearchStops(server: McpServer, deps: ServerDeps): void {
         ...(mode !== undefined ? { mode } : {}),
         ...(limit !== undefined ? { limit } : {}),
       };
-      const result = await (near !== undefined
-        ? searchStopsNear(
-            deps.db,
-            near.lat,
-            near.lon,
-            near.radius_m ?? 500,
-            options,
-          )
-        : query !== undefined
-          ? searchStopsByName(deps.db, query, options)
+      // `query` wins when both are given. Clients with auto-generated forms
+      // (e.g. MCP Inspector) routinely fill in every optional object field
+      // with a skeleton default — `near: {lat: 0, lon: 0}` — even when the
+      // caller only meant to search by name; treating that as a deliberate
+      // proximity search silently strands the query and reports zero
+      // results near Null Island instead.
+      const result = await (query !== undefined
+        ? searchStopsByName(deps.db, query, options)
+        : near !== undefined
+          ? searchStopsNear(
+              deps.db,
+              near.lat,
+              near.lon,
+              near.radius_m ?? 500,
+              options,
+            )
           : undefined);
 
       if (result === undefined) {

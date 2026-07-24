@@ -55,4 +55,21 @@ describe("search_stops", () => {
     };
     expect(dto.error?.code).toBe("invalid_argument");
   });
+
+  it("prioritizes query over near when a client sends both (e.g. an auto-filled form default)", async () => {
+    // Regression test: MCP Inspector's auto-generated form fills in every
+    // optional object field with a skeleton default, sending
+    // `near: {lat: 0, lon: 0}` alongside a genuine `query` even when the
+    // caller never touched the proximity fields. The tool must not let that
+    // silently strand the name search behind a Null Island proximity query.
+    const result = await callTool(
+      "search_stops",
+      { query: "Danforth", near: { lat: 0, lon: 0 } },
+      deps,
+    );
+    expect(result.isError).toBe(false);
+    const dto = result.structuredContent as { stops: StopSummary[] };
+    expect(dto.stops).toHaveLength(1);
+    expect(dto.stops[0]?.name).toBe("Danforth Rd at Kennedy Rd");
+  });
 });
