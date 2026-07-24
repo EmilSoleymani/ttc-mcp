@@ -147,9 +147,10 @@ export async function runIngest(options: IngestOptions): Promise<IngestResult> {
       fetchStopIdentities(client),
       fetchPathwayIdentities(client),
     ]);
+    const knownStopIds = new Set(stops.map((s) => s.stop_id));
     const transfers = mergeTransfers(
       buildStationTransfers(stops),
-      buildPathwayTransfers(pathways),
+      buildPathwayTransfers(pathways, knownStopIds),
       buildStreetTransfers(stops),
     );
     counts.transfers = await insertTransfers(client, transfers);

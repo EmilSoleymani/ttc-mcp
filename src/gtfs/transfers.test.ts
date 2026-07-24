@@ -53,31 +53,49 @@ describe("buildStationTransfers", () => {
 
 describe("buildPathwayTransfers", () => {
   it("uses traversal_time directly and mirrors bidirectional pathways", () => {
-    const transfers = buildPathwayTransfers([
-      {
-        from_stop_id: 1,
-        to_stop_id: 2,
-        is_bidirectional: 1,
-        traversal_time: 90,
-        length: null,
-      },
-    ]);
-    expect(transfers).toEqual([
-      { from_stop_id: 1, to_stop_id: 2, min_walk_seconds: 90, type: "pathway" },
-      { from_stop_id: 2, to_stop_id: 1, min_walk_seconds: 90, type: "pathway" },
-    ]);
+    const transfers = buildPathwayTransfers(
+      [
+        {
+          from_stop_id: 1,
+          to_stop_id: 2,
+          is_bidirectional: 1,
+          traversal_time: 90,
+          length: null,
+        },
+      ],
+      new Set([1, 2]),
+    );
+    expect(transfers).toEqual(
+      expect.arrayContaining([
+        {
+          from_stop_id: 1,
+          to_stop_id: 2,
+          min_walk_seconds: 90,
+          type: "pathway",
+        },
+        {
+          from_stop_id: 2,
+          to_stop_id: 1,
+          min_walk_seconds: 90,
+          type: "pathway",
+        },
+      ]),
+    );
   });
 
   it("derives seconds from length ÷ 1.3 m/s when traversal_time is absent, one-way", () => {
-    const transfers = buildPathwayTransfers([
-      {
-        from_stop_id: 2,
-        to_stop_id: 3,
-        is_bidirectional: 0,
-        traversal_time: null,
-        length: 130,
-      },
-    ]);
+    const transfers = buildPathwayTransfers(
+      [
+        {
+          from_stop_id: 2,
+          to_stop_id: 3,
+          is_bidirectional: 0,
+          traversal_time: null,
+          length: 130,
+        },
+      ],
+      new Set([2, 3]),
+    );
     expect(transfers).toEqual([
       {
         from_stop_id: 2,
@@ -92,17 +110,97 @@ describe("buildPathwayTransfers", () => {
     // Real TTC interchange pathways (e.g. Bloor-Yonge) run tens of seconds to
     // a few minutes of platform-to-platform walking, never near-zero or
     // absurdly long.
-    const [transfer] = buildPathwayTransfers([
-      {
-        from_stop_id: 1,
-        to_stop_id: 2,
-        is_bidirectional: 1,
-        traversal_time: 120,
-        length: null,
-      },
-    ]);
+    const transfers = buildPathwayTransfers(
+      [
+        {
+          from_stop_id: 1,
+          to_stop_id: 2,
+          is_bidirectional: 1,
+          traversal_time: 120,
+          length: null,
+        },
+      ],
+      new Set([1, 2]),
+    );
+    const transfer = transfers.find((t) => t.from_stop_id === 1);
     expect(transfer!.min_walk_seconds).toBeGreaterThanOrEqual(15);
     expect(transfer!.min_walk_seconds).toBeLessThanOrEqual(600);
+  });
+
+  it("resolves a multi-hop pathway through intermediate nodes that aren't real stops (regression: Bloor-Yonge)", () => {
+    // Dataset B's pathway graph routes platform-to-platform walks through
+    // structural nodes (fare gates, concourses) defined only in Dataset B's
+    // own stops.txt, which isn't ingested — so 900/901 never appear in
+    // knownStopIds, exactly like a real subway interchange's fare-gate hops.
+    const yonge = 100;
+    const bloor = 200;
+    const fareGate = 900;
+    const concourse = 901;
+    const transfers = buildPathwayTransfers(
+      [
+        {
+          from_stop_id: yonge,
+          to_stop_id: fareGate,
+          is_bidirectional: 1,
+          traversal_time: 30,
+          length: null,
+        },
+        {
+          from_stop_id: fareGate,
+          to_stop_id: concourse,
+          is_bidirectional: 1,
+          traversal_time: 45,
+          length: null,
+        },
+        {
+          from_stop_id: concourse,
+          to_stop_id: bloor,
+          is_bidirectional: 1,
+          traversal_time: 30,
+          length: null,
+        },
+      ],
+      new Set([yonge, bloor]),
+    );
+
+    expect(transfers).toEqual(
+      expect.arrayContaining([
+        {
+          from_stop_id: yonge,
+          to_stop_id: bloor,
+          min_walk_seconds: 105,
+          type: "pathway",
+        },
+        {
+          from_stop_id: bloor,
+          to_stop_id: yonge,
+          min_walk_seconds: 105,
+          type: "pathway",
+        },
+      ]),
+    );
+    // The intermediate structural nodes are never exposed as endpoints.
+    const endpoints = new Set(
+      transfers.flatMap((t) => [t.from_stop_id, t.to_stop_id]),
+    );
+    expect(endpoints.has(fareGate)).toBe(false);
+    expect(endpoints.has(concourse)).toBe(false);
+  });
+
+  it("finds nothing when no known stop appears in the pathway graph", () => {
+    const transfers = buildPathwayTransfers(
+      [
+        {
+          from_stop_id: 900,
+          to_stop_id: 901,
+          is_bidirectional: 1,
+          traversal_time: 30,
+          length: null,
+        },
+      ],
+      new Set([1, 2]),
+    );
+    expect(transfers).toEqual([]);
   });
 });
 

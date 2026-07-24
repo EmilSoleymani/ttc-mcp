@@ -76,23 +76,94 @@ function pathwayWalkSeconds(pathway: PathwayIdentity): number {
   return STATION_TRANSFER_SECONDS;
 }
 
-/** pathway-type: Dataset B's measured subway in-station walks. */
-export function buildPathwayTransfers(
+interface PathwayEdge {
+  to: number;
+  seconds: number;
+}
+
+function buildPathwayGraph(
   pathways: readonly PathwayIdentity[],
-): TransferRow[] {
-  const transfers: TransferRow[] = [];
+): Map<number, PathwayEdge[]> {
+  const graph = new Map<number, PathwayEdge[]>();
+  const addEdge = (from: number, to: number, seconds: number): void => {
+    const list = graph.get(from);
+    const edge = { to, seconds };
+    if (list) list.push(edge);
+    else graph.set(from, [edge]);
+  };
   for (const pathway of pathways) {
     const seconds = pathwayWalkSeconds(pathway);
-    transfers.push({
-      from_stop_id: pathway.from_stop_id,
-      to_stop_id: pathway.to_stop_id,
-      min_walk_seconds: seconds,
-      type: "pathway",
-    });
+    addEdge(pathway.from_stop_id, pathway.to_stop_id, seconds);
     if (pathway.is_bidirectional === 1) {
+      addEdge(pathway.to_stop_id, pathway.from_stop_id, seconds);
+    }
+  }
+  return graph;
+}
+
+// Station pathway graphs are small (at most a few dozen nodes per complex),
+// so an O(V²) Dijkstra per source is plenty fast — no priority queue needed.
+function shortestWalkSeconds(
+  graph: Map<number, PathwayEdge[]>,
+  source: number,
+): Map<number, number> {
+  const dist = new Map<number, number>([[source, 0]]);
+  const visited = new Set<number>();
+  for (;;) {
+    let current: number | undefined;
+    let currentDist = Infinity;
+    for (const [node, d] of dist) {
+      if (!visited.has(node) && d < currentDist) {
+        current = node;
+        currentDist = d;
+      }
+    }
+    if (current === undefined) break;
+    visited.add(current);
+    for (const edge of graph.get(current) ?? []) {
+      const candidate = currentDist + edge.seconds;
+      const existing = dist.get(edge.to);
+      if (existing === undefined || candidate < existing) {
+        dist.set(edge.to, candidate);
+      }
+    }
+  }
+  return dist;
+}
+
+/**
+ * pathway-type: walk times between real (boardable) stops derived from
+ * Dataset B's pathway graph. A GTFS pathway graph routes through
+ * intermediate structural nodes (fare gates, concourses, stairs) that are
+ * defined in Dataset B's own stops.txt — which isn't ingested here, so those
+ * node ids never appear in `knownStopIds` — the pathway between two
+ * platforms is frequently multi-hop through such nodes rather than a single
+ * direct edge. Treating the raw pathways as a graph and running
+ * shortest-path from each known stop (summing traversal time across hops)
+ * finds the real walk even though the intermediate nodes themselves are
+ * never exposed as transfer endpoints.
+ */
+export function buildPathwayTransfers(
+  pathways: readonly PathwayIdentity[],
+  knownStopIds: ReadonlySet<number>,
+): TransferRow[] {
+  const graph = buildPathwayGraph(pathways);
+
+  const nodeIds = new Set<number>();
+  for (const pathway of pathways) {
+    nodeIds.add(pathway.from_stop_id);
+    nodeIds.add(pathway.to_stop_id);
+  }
+  const sources = [...nodeIds].filter((id) => knownStopIds.has(id));
+
+  const transfers: TransferRow[] = [];
+  for (const source of sources) {
+    const distances = shortestWalkSeconds(graph, source);
+    for (const [nodeId, seconds] of distances) {
+      if (nodeId === source || !knownStopIds.has(nodeId)) continue;
       transfers.push({
-        from_stop_id: pathway.to_stop_id,
-        to_stop_id: pathway.from_stop_id,
+        from_stop_id: source,
+        to_stop_id: nodeId,
         min_walk_seconds: seconds,
         type: "pathway",
       });
