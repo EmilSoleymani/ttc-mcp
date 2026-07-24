@@ -19,6 +19,16 @@ const MODE_BY_ROUTE_TYPE: Readonly<Record<number, Mode>> = {
 };
 const MODE_PRIORITY: readonly Mode[] = ["subway", "streetcar", "bus"];
 
+// The inverse of MODE_BY_ROUTE_TYPE, for pushing a `mode` filter into SQL
+// (searchStopsByName's CANDIDATE_CEILING fix below) — TTC's mode<->route_type
+// mapping is 1:1, so this inversion is lossless.
+const ROUTE_TYPE_BY_MODE: Readonly<Record<Mode, number>> = Object.fromEntries(
+  Object.entries(MODE_BY_ROUTE_TYPE).map(([routeType, mode]) => [
+    mode,
+    Number(routeType),
+  ]),
+) as Record<Mode, number>;
+
 export function modeForRouteType(routeType: number): Mode {
   const mode = MODE_BY_ROUTE_TYPE[routeType];
   if (!mode) {
@@ -266,19 +276,62 @@ async function finishSearch(
   return { stops, truncated };
 }
 
-/** Name search (substring, case-insensitive). */
+/**
+ * Name search (substring, case-insensitive). When a `mode` filter is given,
+ * the mode participates in the SQL candidate query itself — a stop (or, for
+ * a station, any of its child platforms) must be served by a route of that
+ * mode — rather than being applied only after the CANDIDATE_CEILING cap.
+ * Without this, a mode-matching stop whose name sorts alphabetically after
+ * CANDIDATE_CEILING-many mode-mismatched name matches would never make it
+ * into the candidate pool at all (#24).
+ */
 export async function searchStopsByName(
   client: Client,
   query: string,
   options: StopSearchOptions = {},
 ): Promise<StopSearchResult> {
+  const namePattern = `%${query}%`;
+
+  if (options.mode === undefined) {
+    const result = await client.execute({
+      sql: `SELECT ${STOP_COLUMNS} FROM stops
+            WHERE stop_name LIKE ? COLLATE NOCASE
+            ORDER BY stop_name
+            LIMIT ?`,
+      args: [namePattern, CANDIDATE_CEILING],
+    });
+    return finishSearch(client, rowsFrom(result), options);
+  }
+
+  const routeType = ROUTE_TYPE_BY_MODE[options.mode];
   const result = await client.execute({
-    sql: `SELECT ${STOP_COLUMNS} FROM stops
-          WHERE stop_name LIKE ? COLLATE NOCASE
-          ORDER BY stop_name
+    sql: `SELECT ${STOP_COLUMNS} FROM stops s
+          WHERE s.stop_name LIKE ? COLLATE NOCASE
+            AND (
+              EXISTS (
+                SELECT 1 FROM stop_times st
+                JOIN trips t ON t.trip_id = st.trip_id
+                JOIN routes r ON r.route_id = t.route_id
+                WHERE st.stop_id = s.stop_id AND r.route_type = ?
+              )
+              OR EXISTS (
+                SELECT 1 FROM stops c
+                JOIN stop_times st ON st.stop_id = c.stop_id
+                JOIN trips t ON t.trip_id = st.trip_id
+                JOIN routes r ON r.route_id = t.route_id
+                WHERE c.parent_station = s.stop_id AND r.route_type = ?
+              )
+            )
+          ORDER BY s.stop_name
           LIMIT ?`,
-    args: [`%${query}%`, CANDIDATE_CEILING],
+    args: [namePattern, routeType, routeType, CANDIDATE_CEILING],
   });
+  // finishSearch still re-applies the mode filter: this SQL query is
+  // deliberately broader (any route of the requested mode at the stop or a
+  // child platform), while a stop's *resolved* mode (used for equality here
+  // and for the returned DTO) is priority-tie-broken across all of its
+  // modes (MODE_PRIORITY) — the two can disagree for a genuinely
+  // multi-mode station, and the tie-broken single-mode field must win.
   return finishSearch(client, rowsFrom(result), options);
 }
 

@@ -54,6 +54,50 @@ describe("stops repository", () => {
       expect(stops).toHaveLength(1);
       expect(truncated).toBe(true);
     });
+
+    it("a mode-matching stop isn't starved out by name candidates that fill the CANDIDATE_CEILING (#24)", async () => {
+      // Reproduces the real-world "Finch" bug: a subway stop named "Finch
+      // Station" sorts alphabetically ('S') after many more "Finch Ave ..."
+      // bus stops ('A') — if the mode filter only applies after the SQL
+      // LIMIT caps the candidate pool (CANDIDATE_CEILING = 200), the subway
+      // stop is never fetched from the DB at all, and mode: "subway" wrongly
+      // returns nothing.
+      const busStopCount = 205;
+      for (let i = 0; i < busStopCount; i++) {
+        const stopId = 20000 + i;
+        await client.execute({
+          sql: `INSERT INTO stops (stop_id, stop_name, stop_lat, stop_lon, location_type)
+                VALUES (?, ?, 43.78, -79.42, NULL)`,
+          args: [
+            stopId,
+            `Finch Ave East at Stop ${String(i).padStart(3, "0")}`,
+          ],
+        });
+        await client.execute({
+          sql: `INSERT INTO stop_times (trip_id, stop_id, stop_sequence, arr, dep)
+                VALUES (2, ?, ?, NULL, NULL)`,
+          args: [stopId, 100 + i],
+        });
+      }
+
+      await client.execute({
+        sql: `INSERT INTO stops (stop_id, stop_name, stop_lat, stop_lon, location_type)
+              VALUES (30000, 'Finch Station', 43.78, -79.41, 1)`,
+      });
+      await client.execute({
+        sql: `INSERT INTO stop_times (trip_id, stop_id, stop_sequence, arr, dep)
+              VALUES (1, 30000, 2, NULL, NULL)`,
+      });
+
+      const noFilter = await searchStopsByName(client, "Finch");
+      expect(noFilter.truncated).toBe(true);
+      expect(noFilter.stops.every((s) => s.mode === "bus")).toBe(true);
+
+      const { stops } = await searchStopsByName(client, "Finch", {
+        mode: "subway",
+      });
+      expect(stops.map((s) => s.stop_id)).toEqual(["30000"]);
+    });
   });
 
   describe("searchStopsNear", () => {
