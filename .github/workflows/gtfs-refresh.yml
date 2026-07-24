@@ -1,0 +1,54 @@
+# GTFS-refresh: weekly cron + CKAN last_modified poll -> rebuild the
+# optimized DB (+ synthetic transfers) -> push to Turso, but only on an
+# actual upstream change (docs/spec/gtfs-ingestion.md "Refresh model").
+#
+# Needs the Turso secrets provisioned in #1: TURSO_DATABASE_URL,
+# TURSO_AUTH_TOKEN.
+name: GTFS Refresh
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check GTFS freshness
+        id: freshness
+        run: npm run check-gtfs-freshness
+
+      - name: Ingest and push to Turso
+        if: steps.freshness.outputs.changed == 'true'
+        run: npm run ingest
+        env:
+          LIBSQL_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          LIBSQL_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+
+      - name: Persist refresh state
+        if: steps.freshness.outputs.changed == 'true'
+        run: |
+          mkdir -p .github
+          echo '${{ steps.freshness.outputs.state }}' > .github/gtfs-refresh-state.json
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/gtfs-refresh-state.json
+          if git diff --cached --quiet; then
+            echo "No state change to commit."
+          else
+            git commit -m "chore: record GTFS refresh state [skip ci]"
+            git push
+          fi

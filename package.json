@@ -21,6 +21,8 @@
   "scripts": {
     "dev": "tsx watch src/entry/http.ts",
     "ingest": "tsx src/entry/ingest.ts",
+    "check-gtfs-freshness": "tsx src/entry/check-freshness.ts",
+    "smoke": "tsx src/entry/smoke.ts",
     "build": "tsc -p tsconfig.build.json",
     "start:stdio": "node dist/entry/stdio.js",
     "start:http": "node dist/entry/http.js",
@@ -36,6 +38,7 @@
     "@libsql/client": "^0.17.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "csv-parse": "^7.0.1",
+    "gtfs-realtime-bindings": "^2.1.0",
     "unzipper": "^0.12.5",
     "zod": "^4.4.3"
   },

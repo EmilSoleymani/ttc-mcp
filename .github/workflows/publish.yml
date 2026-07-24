@@ -1,0 +1,67 @@
+# Tag-triggered dual publish: v* -> npm (`ttc-mcp`) + ghcr
+# (`ghcr.io/emilsoleymani/ttc-mcp`) (stack-baseline: inherits go-planner's
+# docker-deployment "ghcr+npm tag-triggered publish" spec).
+#
+# npm publish needs an NPM_TOKEN repo secret (an npm automation token with
+# publish rights) — not one of the Turso/Vercel secrets from #1, provision
+# separately. ghcr publish uses the built-in GITHUB_TOKEN.
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  ghcr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/emilsoleymani/ttc-mcp
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
