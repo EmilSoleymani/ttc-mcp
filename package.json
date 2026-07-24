@@ -1,0 +1,50 @@
+{
+  "name": "ttc-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for the Toronto Transit Commission (TTC): schedules, live vehicles, arrivals, service alerts, and multi-modal trip planning.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Emil Soleymani",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EmilSoleymani/ttc-mcp.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "ttc-mcp": "dist/entry/stdio.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/entry/http.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start:stdio": "node dist/entry/stdio.js",
+    "start:http": "node dist/entry/http.js",
+    "mcp-inspector": "npx @modelcontextprotocol/inspector",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.5",
+    "tsx": "^4.23.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^4.1.10"
+  }
+}
