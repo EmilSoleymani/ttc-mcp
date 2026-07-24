@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { registerResources } from "./resources.js";
 import { registerGetFare } from "./tools/get-fare.js";
+import { registerGetSchedule } from "./tools/get-schedule.js";
 import { registerGetStop } from "./tools/get-stop.js";
 import { registerSearchStops } from "./tools/search-stops.js";
 
@@ -21,6 +22,7 @@ export function registerTools(server: McpServer, deps: ServerDeps): void {
   registerGetFare(server);
   registerSearchStops(server, deps);
   registerGetStop(server, deps);
+  registerGetSchedule(server, deps);
   registerResources(server, deps);
 }
 

@@ -60,7 +60,7 @@ const STOP_COLUMNS =
 // libSQL's Value type includes ArrayBuffer (for BLOB columns), which has no
 // meaningful String() representation; every column read here is a schema
 // TEXT column, so narrow explicitly instead of blindly stringifying.
-function asText(value: unknown): string {
+export function asText(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "bigint") {
     return String(value);
@@ -101,7 +101,7 @@ function toStopSummary(row: StopRow, mode: Mode): StopSummary {
 
 // GTFS often leaves an optional text field as "" rather than NULL for a
 // blank CSV cell (ingest passes it through as-is) — treat both as "absent".
-function presence(value: string | null): string | undefined {
+export function presence(value: string | null): string | undefined {
   return value === null || value === "" ? undefined : value;
 }
 
