@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { buildFixtureDb } from "./gtfs/test-support.js";
 import type { FareResult } from "./schemas/fare.js";
-import type { StopSummary } from "./schemas/stop.js";
+import type { RouteSummary, StopSummary } from "./schemas/stop.js";
 import type { ServerDeps } from "./server.js";
 import { readResource } from "./tools/test-support.js";
 
@@ -48,5 +48,29 @@ describe("ttc://stops resource", () => {
       "9000",
       "9001",
     ]);
+  });
+});
+
+describe("ttc://routes resource", () => {
+  let db: Client;
+  let deps: ServerDeps;
+  beforeEach(async () => {
+    db = await buildFixtureDb();
+    deps = { db };
+  });
+  afterEach(() => {
+    db.close();
+  });
+
+  it("returns the full route catalog", async () => {
+    const contents = await readResource("ttc://routes", deps);
+    expect(contents).toHaveLength(1);
+
+    const entry = contents[0]!;
+    expect(entry.uri).toBe("ttc://routes");
+    expect(entry.mimeType).toBe("application/json");
+
+    const dto = JSON.parse(entry.text) as RouteSummary[];
+    expect(dto.map((r) => r.route_id).sort()).toEqual(["1", "900"]);
   });
 });

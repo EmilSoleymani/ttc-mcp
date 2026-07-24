@@ -4,7 +4,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerResources } from "./resources.js";
 import { registerGetFare } from "./tools/get-fare.js";
 import { registerGetSchedule } from "./tools/get-schedule.js";
+import { registerGetRoute } from "./tools/get-route.js";
 import { registerGetStop } from "./tools/get-stop.js";
+import { registerListRoutes } from "./tools/list-routes.js";
 import { registerSearchStops } from "./tools/search-stops.js";
 
 export const SERVER_INFO = { name: "ttc-mcp", version: "0.1.0" };
@@ -23,6 +25,8 @@ export function registerTools(server: McpServer, deps: ServerDeps): void {
   registerSearchStops(server, deps);
   registerGetStop(server, deps);
   registerGetSchedule(server, deps);
+  registerListRoutes(server, deps);
+  registerGetRoute(server, deps);
   registerResources(server, deps);
 }
 
