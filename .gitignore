@@ -8,3 +8,5 @@ docker-compose.override.yml
 data/*.zip
 data/*.db
 data/gtfs/
+.vercel
+.env*
