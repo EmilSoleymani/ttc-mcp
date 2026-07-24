@@ -1,18 +1,27 @@
+import type { Client } from "@libsql/client";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { registerResources } from "./resources.js";
 import { registerGetFare } from "./tools/get-fare.js";
+import { registerGetStop } from "./tools/get-stop.js";
+import { registerSearchStops } from "./tools/search-stops.js";
 
 export const SERVER_INFO = { name: "ttc-mcp", version: "0.1.0" };
 
+/** Shared dependencies data-backed tools/resources need — the libSQL query
+ * layer today; the GTFS-RT client joins this once a live-data slice needs it. */
+export interface ServerDeps {
+  db: Client;
+}
+
 /**
- * Registers every tool/resource/prompt onto a server instance. As later slices
- * add data-backed tools this will take a `deps` argument (the libSQL query
- * layer + GTFS-RT client); the static get_fare tool needs none.
+ * Registers every tool/resource/prompt onto a server instance.
  */
-export function registerTools(server: McpServer): void {
+export function registerTools(server: McpServer, deps: ServerDeps): void {
   registerGetFare(server);
-  registerResources(server);
+  registerSearchStops(server, deps);
+  registerGetStop(server, deps);
+  registerResources(server, deps);
 }
 
 /**
@@ -20,8 +29,8 @@ export function registerTools(server: McpServer): void {
  * surfaces call this and only this (stack-baseline: inherits go-planner's
  * project-architecture spec §3).
  */
-export function buildServer(): McpServer {
+export function buildServer(deps: ServerDeps): McpServer {
   const server = new McpServer(SERVER_INFO);
-  registerTools(server);
+  registerTools(server, deps);
   return server;
 }
