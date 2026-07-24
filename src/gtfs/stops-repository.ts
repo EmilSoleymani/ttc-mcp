@@ -19,7 +19,7 @@ const MODE_BY_ROUTE_TYPE: Readonly<Record<number, Mode>> = {
 };
 const MODE_PRIORITY: readonly Mode[] = ["subway", "streetcar", "bus"];
 
-function modeForRouteType(routeType: number): Mode {
+export function modeForRouteType(routeType: number): Mode {
   const mode = MODE_BY_ROUTE_TYPE[routeType];
   if (!mode) {
     throw new Error(
@@ -36,7 +36,7 @@ function pickMode(routeTypes: Iterable<number>): Mode | undefined {
   return undefined;
 }
 
-interface StopRow {
+export interface StopRow {
   stop_id: number;
   stop_code: number | null;
   stop_name: string;
@@ -46,7 +46,7 @@ interface StopRow {
   location_type: number | null;
 }
 
-interface StopRoute {
+export interface StopRoute {
   route_id: number;
   route_short_name: string | null;
   route_long_name: string | null;
@@ -54,13 +54,13 @@ interface StopRoute {
   route_color: string | null;
 }
 
-const STOP_COLUMNS =
+export const STOP_COLUMNS =
   "stop_id, stop_code, stop_name, stop_lat, stop_lon, parent_station, location_type";
 
 // libSQL's Value type includes ArrayBuffer (for BLOB columns), which has no
 // meaningful String() representation; every column read here is a schema
 // TEXT column, so narrow explicitly instead of blindly stringifying.
-function asText(value: unknown): string {
+export function asText(value: unknown): string {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "bigint") {
     return String(value);
@@ -68,7 +68,7 @@ function asText(value: unknown): string {
   throw new Error("Expected a text column value from libSQL.");
 }
 
-function rowsFrom(result: ResultSet): StopRow[] {
+export function rowsFrom(result: ResultSet): StopRow[] {
   return result.rows.map((row) => ({
     stop_id: Number(row.stop_id),
     stop_code: row.stop_code === null ? null : Number(row.stop_code),
@@ -82,7 +82,7 @@ function rowsFrom(result: ResultSet): StopRow[] {
   }));
 }
 
-function toStopSummary(row: StopRow, mode: Mode): StopSummary {
+export function toStopSummary(row: StopRow, mode: Mode): StopSummary {
   return {
     stop_id: String(row.stop_id),
     ...(row.stop_code !== null ? { stop_code: String(row.stop_code) } : {}),
@@ -101,11 +101,11 @@ function toStopSummary(row: StopRow, mode: Mode): StopSummary {
 
 // GTFS often leaves an optional text field as "" rather than NULL for a
 // blank CSV cell (ingest passes it through as-is) — treat both as "absent".
-function presence(value: string | null): string | undefined {
+export function presence(value: string | null): string | undefined {
   return value === null || value === "" ? undefined : value;
 }
 
-function toRouteSummary(route: StopRoute): RouteSummary {
+export function toRouteSummary(route: StopRoute): RouteSummary {
   const shortName = presence(route.route_short_name);
   const longName = presence(route.route_long_name);
   const color = presence(route.route_color);
