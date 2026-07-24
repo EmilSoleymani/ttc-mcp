@@ -21,6 +21,7 @@ A complete technical spec and TTC data-source research report for a **TTC (Toron
 
 ## Decisions so far
 
+- [Grilling: Tool Schema & DTO Design](tickets/007-tool-schema-design.md) — **`stop_id` canonical** (stations aggregate child platforms grouped by direction), **`route_id` canonical** (one identity model), times **absolute ISO 8601 + Toronto offset**, `get_schedule` a **single bounded next-N tool** (cap ~20, truncated+hint). Snake_case Zod `outputSchema`/`structuredContent` on all tools; closed-enum in-result errors (`ambiguous` → candidate list as success). Full per-tool DTOs for all 10 tools + 3 Resources in [docs/spec/tool-schemas.md](../docs/spec/tool-schemas.md). RT field shapes → 008; plan_trip DTO → 009.
 - [Grilling: GTFS Ingestion & Storage Design](tickets/006-ingestion-storage-design.md) — **the crux, resolved with a real measurement** (built the 4.2M-row DB): optimized = **237 MB**, over Vercel's ~250 MB budget → **substrate is Turso/libSQL** (Vercel queries remote; Docker uses a local libSQL file; one `@libsql/client` path, hand-rolled query layer, no node-gtfs). Schema: typed, int seconds-since-midnight times. Feeds: **A** for schedules + **B's `pathways`/`levels`** for subway interchanges (no `transfers.txt`). Refresh: weekly cron + CKAN poll → push to Turso on change. **Ripple: Turso reintroduces secrets** (`LIBSQL_AUTH_TOKEN`/Vercel, Turso creds/CI) — amends 002 + stack-baseline. Full spec [docs/spec/gtfs-ingestion.md](../docs/spec/gtfs-ingestion.md).
 - [Grilling: MCP Tool & Primitive Roster](tickets/005-tool-roster.md) — **10 TTC-native tools** (search_stops, get_stop, list_routes, get_route, get_schedule, get_arrivals, get_vehicles, get_alerts, get_fare, + reserved plan_trip). Subway asymmetry handled by a **unified `get_arrivals`** that falls back to scheduled times (tagged `realtime:false`) for subway; `get_vehicles` returns empty+reason for subway. Catalog + fares exposed as **both Resources (`ttc://stops|routes|fares`) and mirror Tools**. v1 prompts: `check_my_commute`, `service_status`, `nearby_stops` (+ `plan_a_trip` reserved → 009). RT only via filtered tools. Detail → 007/008/009.
 - [Grilling: Stack Baseline & Deltas from go-planner](tickets/004-stack-baseline.md) — **clone go-planner wholesale**: all five specs (architecture, test, CI/CD, Docker, caching) + Node `[20,22]` inherited **verbatim** (full record in [docs/spec/stack-baseline.md](../docs/spec/stack-baseline.md)). Confirmed deltas: **protobuf dep forced** (JSON approach dropped), GTFS-ingestion deps, **no API-key secret**, **+GTFS-refresh workflow** (shape TBD in 006), +GTFS/protobuf test fixtures, 6h schedule-TTL moot (schedules are a local DB now). Identity **`ttc-mcp`** on npm + ghcr → **closes ticket 002's package-name item**. Hosting: Vercel + Docker both first-class; `.db`-vs-Vercel-budget measurement (ticket 006) decides bake-in vs. Turso.
@@ -50,15 +51,15 @@ _(none — the way to the destination is fully charted; only tickets 007, 008, a
 ### Frontier (unblocked, open)
 
 - [Task: Create ttc-mcp Repo & Deployment](tickets/002-create-repo.md) — HITL; repo + initial commit done, **Vercel wiring + Turso env/secrets remain** (per 006)
-- [Grilling: Tool Schema & DTO Design](tickets/007-tool-schema-design.md) — unblocked (005 resolved)
 - [Grilling: GTFS-RT Real-time Integration & Cache Deltas](tickets/008-realtime-integration.md) — unblocked (001 + 005 resolved)
 
 ### Blocked (open, waiting)
 
-- [Grilling: plan_trip — Multi-modal Transfer Routing](tickets/009-plan-trip-routing.md) — blocked by 007, 008 (005 + 006 cleared) — the deferred capstone
+- [Grilling: plan_trip — Multi-modal Transfer Routing](tickets/009-plan-trip-routing.md) — blocked by 008 (005 + 006 + 007 cleared) — the deferred capstone, one ticket away
 
 ### Resolved
 
+- [Grilling: Tool Schema & DTO Design](tickets/007-tool-schema-design.md) — stop_id/route_id canonical, stations aggregate, ISO 8601 Toronto times, bounded next-N get_schedule, closed-enum errors ([docs/spec/tool-schemas.md](../docs/spec/tool-schemas.md))
 - [Grilling: GTFS Ingestion & Storage Design](tickets/006-ingestion-storage-design.md) — measured DB = 237 MB → **Turso/libSQL** substrate; A schedules + B pathways/levels; weekly cron+poll refresh ([docs/spec/gtfs-ingestion.md](../docs/spec/gtfs-ingestion.md))
 - [Grilling: MCP Tool & Primitive Roster](tickets/005-tool-roster.md) — 10 TTC-native tools + Resources + 3 v1 prompts; unified get_arrivals w/ scheduled subway fallback; plan_trip/plan_a_trip reserved → 009
 - [Grilling: Stack Baseline & Deltas from go-planner](tickets/004-stack-baseline.md) — clone go-planner verbatim + confirmed deltas; identity `ttc-mcp`; hosting decision deferred to 006 ([docs/spec/stack-baseline.md](../docs/spec/stack-baseline.md))
