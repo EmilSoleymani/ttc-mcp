@@ -21,6 +21,7 @@ A complete technical spec and TTC data-source research report for a **TTC (Toron
 
 ## Decisions so far
 
+- [Grilling: MCP Tool & Primitive Roster](tickets/005-tool-roster.md) — **10 TTC-native tools** (search_stops, get_stop, list_routes, get_route, get_schedule, get_arrivals, get_vehicles, get_alerts, get_fare, + reserved plan_trip). Subway asymmetry handled by a **unified `get_arrivals`** that falls back to scheduled times (tagged `realtime:false`) for subway; `get_vehicles` returns empty+reason for subway. Catalog + fares exposed as **both Resources (`ttc://stops|routes|fares`) and mirror Tools**. v1 prompts: `check_my_commute`, `service_status`, `nearby_stops` (+ `plan_a_trip` reserved → 009). RT only via filtered tools. Detail → 007/008/009.
 - [Grilling: Stack Baseline & Deltas from go-planner](tickets/004-stack-baseline.md) — **clone go-planner wholesale**: all five specs (architecture, test, CI/CD, Docker, caching) + Node `[20,22]` inherited **verbatim** (full record in [docs/spec/stack-baseline.md](../docs/spec/stack-baseline.md)). Confirmed deltas: **protobuf dep forced** (JSON approach dropped), GTFS-ingestion deps, **no API-key secret**, **+GTFS-refresh workflow** (shape TBD in 006), +GTFS/protobuf test fixtures, 6h schedule-TTL moot (schedules are a local DB now). Identity **`ttc-mcp`** on npm + ghcr → **closes ticket 002's package-name item**. Hosting: Vercel + Docker both first-class; `.db`-vs-Vercel-budget measurement (ticket 006) decides bake-in vs. Turso.
 - [Research: TTC Feed & API Inventory](tickets/001-ttc-feed-inventory.md) — **GTFS-RT is protobuf-only** (`?format=json` ignored → protobuf dep forced); **TripUpdates carry real epoch-time predictions** (no unofficial API needed); **`transfers.txt`, fare_attributes/fare_rules, frequencies are ABSENT** (calendar/calendar_dates/shapes present → forces proximity/interchange transfer model + no GTFS fare data); **two merged all-modes datasets** (35 MB `opendata_ttc_schedules.zip` ~6-wk vs. 81 MB `completegtfs.zip` quarterly); **NO subway real-time** — vehicles/trip-updates are bus+streetcar only, subway is Alerts + schedule only. Open risk: OGL-Toronto vs. CKAN `notspecified` license discrepancy; RT terms/rate-limits undocumented.
 - [Research: GTFS Static Ingestion & Query Approaches](tickets/003-gtfs-ingestion-research.md) — lean **`node-gtfs`/better-sqlite3 → read-only SQLite baked into the deploy artifact, cron rebuild-and-redeploy** for the ~6-week refresh; one query codepath across Docker (writable FS) and Vercel (read-only bundle). Fallback **Turso/libSQL** if the derived `.db` won't fit. RAPTOR/CSA trip-planning wants a separate in-memory timetable substrate (→ ticket 009, likely Docker-first). Hard constraint: better-sqlite3 works on Vercel Hobby only if compiled at build & queried read-only; **open unknown = derived `.db` size vs. Vercel bundle/cold-start budget — ticket 006 must measure it.**
@@ -30,7 +31,9 @@ A complete technical spec and TTC data-source research report for a **TTC (Toron
 <!-- fog: in scope, not yet sharp enough to ticket; graduates as the frontier advances -->
 
 - **CI/CD & Docker deltas from GTFS ingestion** — the cloned go-planner CI/Docker specs assume a pure live-API server. Ingesting a GTFS ZIP likely adds a build-time (or scheduled) fetch/parse/bundle step and a ~6-week refresh mechanism. The exact shape can't be specified until *GTFS Ingestion & Storage Design* (006) resolves; graduates then.
-- **Resources & Prompts roster** — go-planner ships static data as MCP Resources plus v1 Prompt templates. Whether TTC mirrors that (and which prompts) can't be pinned until the tool roster (005) is settled; graduates then.
+<!-- Resources & Prompts roster: GRADUATED — resolved by ticket 005 (Resources ttc://stops|routes|fares + mirror Tools; prompts check_my_commute/service_status/nearby_stops, plan_a_trip reserved). -->
+
+_(no remaining fog beyond the CI/CD & Docker ingestion deltas above — the way forward is otherwise charted.)_
 
 ## Out of scope
 
@@ -46,17 +49,17 @@ A complete technical spec and TTC data-source research report for a **TTC (Toron
 ### Frontier (unblocked, open)
 
 - [Task: Create ttc-mcp Repo & Deployment](tickets/002-create-repo.md) — HITL; repo + initial commit done, **only Vercel wiring remains** (package name settled by 004)
-- [Grilling: MCP Tool & Primitive Roster](tickets/005-tool-roster.md) — unblocked (001 resolved)
 - [Grilling: GTFS Ingestion & Storage Design](tickets/006-ingestion-storage-design.md) — unblocked (001 + 003 resolved)
+- [Grilling: Tool Schema & DTO Design](tickets/007-tool-schema-design.md) — **now unblocked** (005 resolved)
+- [Grilling: GTFS-RT Real-time Integration & Cache Deltas](tickets/008-realtime-integration.md) — **now unblocked** (001 + 005 resolved)
 
 ### Blocked (open, waiting)
 
-- [Grilling: Tool Schema & DTO Design](tickets/007-tool-schema-design.md) — blocked by 005
-- [Grilling: GTFS-RT Real-time Integration & Cache Deltas](tickets/008-realtime-integration.md) — blocked by 005 (001 cleared)
-- [Grilling: plan_trip — Multi-modal Transfer Routing](tickets/009-plan-trip-routing.md) — blocked by 005, 006, 007, 008 (the deferred capstone)
+- [Grilling: plan_trip — Multi-modal Transfer Routing](tickets/009-plan-trip-routing.md) — blocked by 006, 007, 008 (005 cleared) — the deferred capstone
 
 ### Resolved
 
+- [Grilling: MCP Tool & Primitive Roster](tickets/005-tool-roster.md) — 10 TTC-native tools + Resources + 3 v1 prompts; unified get_arrivals w/ scheduled subway fallback; plan_trip/plan_a_trip reserved → 009
 - [Grilling: Stack Baseline & Deltas from go-planner](tickets/004-stack-baseline.md) — clone go-planner verbatim + confirmed deltas; identity `ttc-mcp`; hosting decision deferred to 006 ([docs/spec/stack-baseline.md](../docs/spec/stack-baseline.md))
 - [Research: TTC Feed & API Inventory](tickets/001-ttc-feed-inventory.md) — protobuf-only RT, real predictions, NO transfers.txt/fares/subway-RT, two datasets (35/81 MB); license discrepancy flagged
 - [Research: GTFS Static Ingestion & Query Approaches](tickets/003-gtfs-ingestion-research.md) — lean node-gtfs/SQLite baked into deploy, Turso fallback; open unknown = derived `.db` size vs. Vercel budget (ticket 006 to measure)

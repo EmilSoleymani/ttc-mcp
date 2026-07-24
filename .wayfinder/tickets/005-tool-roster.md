@@ -2,7 +2,7 @@
 id: "005"
 title: "Grilling: MCP Tool & Primitive Roster"
 type: grilling
-status: open
+status: resolved
 blocked_by: ["001"]
 blocks: ["007", "008", "009"]
 ---
@@ -21,3 +21,47 @@ Decisions needed:
 **Deliverable:** the roster decision recorded in this ticket's Answer; the detailed schemas are ticket 007. Graduates the "Resources & Prompts roster" fog line on the map.
 
 ## Answer
+
+Grilled 2026-07-23. TTC-native naming (not a copy of go-planner's). Detailed schemas → ticket 007.
+
+### Tools (10)
+
+**Catalog & schedule (from ingested GTFS):**
+1. `search_stops(query, near?, mode?)` — find stops/stations by name or lat-lng proximity
+2. `get_stop(stop)` — stop/station details: routes served, location, accessibility, mode
+3. `list_routes(mode?)` — subway lines · streetcars · buses
+4. `get_route(route)` — directions, stops served
+5. `get_schedule(stop, route?, when?)` — scheduled departures at a stop (anti-dump discipline per ticket 007)
+
+**Real-time (GTFS-RT, protobuf; bus + streetcar):**
+6. `get_arrivals(stop, route?)` — **unified**: live predicted next arrivals for bus/streetcar; for **subway stops it transparently returns the next SCHEDULED departures** from the ingested GTFS, tagged `realtime: false` / `source: "scheduled"`. One tool for any stop, honest labeling. (Detail → ticket 008.)
+7. `get_vehicles(route)` — live vehicle positions, server-side filtered by route; for subway routes returns an **empty result + reason** (no subway RT).
+8. `get_alerts(mode?, route?, stop?, category?)` — service alerts incl. elevator/escalator; **subway-inclusive** (Alerts feed covers subway).
+
+**Fares:**
+9. `get_fare(...)` — returns the hand-maintained TTC fare table (adult/senior/youth PRESTO + cash, 2-hour transfer rule, passes).
+
+**Trip planning:**
+10. `plan_trip(...)` — **reserved name only**; full design deferred to ticket 009. Roster leaves a clean seam.
+
+### Resources
+
+- `ttc://stops` — full stop/station catalog (~9k rows; static, opt-in read)
+- `ttc://routes` — full route catalog
+- `ttc://fares` — same fare table as `get_fare`
+- Catalog data is exposed as **both Resources and mirror Tools** (belt-and-suspenders — covers Resource-ignoring clients). Fares likewise (tool + resource).
+
+### Prompts
+
+- **v1 ships:** `check_my_commute` (wraps `get_arrivals`), `service_status` (wraps `get_alerts`), `nearby_stops` (wraps `search_stops(near)` + `get_stop`).
+- **Reserved, ships with ticket 009:** `plan_a_trip` (wraps `plan_trip`) — cannot exist before the tool it composes.
+
+### Cross-cutting rules (adopted from go-planner, per stack-baseline)
+
+- **GTFS-RT exposed ONLY through server-side-filtered tools — never raw full-dataset dumps.**
+- Every tool gets a Zod `outputSchema` + `structuredContent` (schema detail → ticket 007).
+
+### Hand-offs
+- **Ticket 007** (schemas): DTOs, ID model, the `realtime`/`source` field shape on `get_arrivals`, anti-dump on `get_schedule`.
+- **Ticket 008** (RT): implements the `get_arrivals` unified/fallback behavior and `get_vehicles` subway-empty behavior.
+- **Ticket 009** (plan_trip): builds `plan_trip` + the `plan_a_trip` prompt.
