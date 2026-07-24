@@ -2,7 +2,7 @@
 id: "006"
 title: "Grilling: GTFS Ingestion & Storage Design"
 type: grilling
-status: open
+status: resolved
 blocked_by: ["001", "003"]
 blocks: ["009"]
 ---
@@ -24,3 +24,14 @@ Decisions needed:
 **Deliverable:** `docs/spec/gtfs-ingestion.md` in the repo. **Graduates the "CI/CD & Docker deltas from GTFS ingestion" fog line** — after this resolves, spin out the concrete CI-refresh-workflow and Docker-bake tickets if they need their own decisions.
 
 ## Answer
+
+Grilled 2026-07-23, grounded in an **empirical DB measurement** (built the real SQLite DB from the 4.2M-row feed). Full spec: [`../../docs/spec/gtfs-ingestion.md`](../../docs/spec/gtfs-ingestion.md).
+
+- **Measurement (the make-or-break):** optimized typed schema (int times, int keys, essential cols, indexed) = **237 MB**; naïve all-TEXT = 468–488 MB. 237 MB + node_modules **exceeds Vercel's ~250 MB function budget → bake-in on Vercel is NOT viable**. `node-gtfs`'s TEXT schema ≈ the 468 MB case, so it's out.
+- **Substrate: Turso/libSQL, unified.** DB lives in Turso; Vercel queries remote over HTTP (keeps it first-class, no size/native-binary wall), Docker uses an embedded local libSQL file baked at image build. One `@libsql/client` codepath; hand-rolled thin query layer (no node-gtfs).
+- **Schema:** typed, integer surrogate keys, **times as INTEGER seconds-since-midnight**, essential columns only; shapes excluded from v1. Indexes verified against the "next departures at stop" query plan.
+- **Feeds:** Dataset A (35 MB, ~6-wk) for all schedule tables + Dataset B's **`pathways`/`levels`** for the subway interchange graph (compensates for absent `transfers.txt`). Resolved via CKAN `package_show`.
+- **Ingest:** a Node script streams the CSVs (stop_times must stream — 4.2 M rows), builds the optimized DB, syncs to Turso / writes the local file. Same script for CI refresh and Docker build.
+- **Refresh: scheduled GitHub Actions cron (weekly) + CKAN `last_modified`/ETag poll** → rebuild+push only on change. Self-hosters re-run the script / pull a new image. **Graduates the CI/CD & Docker fog line** (no separate ticket needed — decisions are made).
+- **Config/secrets ripple:** TTC feeds stay keyless, but **Turso reintroduces secrets** — `LIBSQL_URL` + `LIBSQL_AUTH_TOKEN` on Vercel, Turso creds in CI. **Amends ticket 002 and the stack-baseline CI delta.**
+- **Hosting watch-item from ticket 004 is now RESOLVED:** both targets stay first-class via Turso.

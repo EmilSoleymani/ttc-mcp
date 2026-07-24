@@ -19,7 +19,9 @@ The repo `ttc-mcp` needs to exist as a public GitHub repository (and Vercel proj
 - **DELTA vs go-planner: there is NO API-key secret to configure.** The TTC official feeds are keyless, so no `*_API_KEY` Actions secret / Vercel env var is required for auth. (Any env vars will instead concern GTFS ingestion — e.g. feed URLs, cache toggles — determined by ticket 006.)
 - Confirm npm + ghcr package names to reserve (e.g. `ttc-mcp` / `toronto-transit-mcp`) consistent with go-planner's tag-triggered dual-publish pattern. **✓ SETTLED (ticket 004): `ttc-mcp` on both npm and ghcr (`ghcr.io/emilsoleymani/ttc-mcp`).**
 
-**Remaining to fully resolve 002 (HITL, non-blocking):** wire up Vercel — connect the repo + create the project. No auth env var needed; env vars for the GTFS feed/DB come from ticket 006. Repo creation + initial commit (LICENSE/README/.gitignore + planning docs) are already done and pushed to `main`.
+**Remaining to fully resolve 002 (HITL, non-blocking):** wire up Vercel — connect the repo + create the project. Repo creation + initial commit (LICENSE/README/.gitignore + planning docs) are already done and pushed to `main`.
+
+**⚠ UPDATE (ticket 006): Vercel DOES need env vars after all** — not for TTC (feeds are keyless) but for **Turso**: set `LIBSQL_URL` (the `libsql://…turso.io` URL) and `LIBSQL_AUTH_TOKEN` (**secret**). Also provision a **Turso database** and add `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` as **GitHub Actions secrets** so the ingest/refresh workflow can push the built DB. So the "no secret" delta is now "no *TTC* secret; Turso creds required."
 
 **This is a HITL task** — the user creates the repo and connects Vercel. Provide a precise checklist. Record the resulting repo URL and Vercel project URL as the resolution so downstream tickets can reference them.
 
