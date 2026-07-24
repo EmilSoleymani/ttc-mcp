@@ -17,7 +17,9 @@ The repo `ttc-mcp` needs to exist as a public GitHub repository (and Vercel proj
 - Default branch `main`; GitHub Actions on by default.
 - Wire up Vercel: connect the repo, create the project.
 - **DELTA vs go-planner: there is NO API-key secret to configure.** The TTC official feeds are keyless, so no `*_API_KEY` Actions secret / Vercel env var is required for auth. (Any env vars will instead concern GTFS ingestion — e.g. feed URLs, cache toggles — determined by ticket 006.)
-- Confirm npm + ghcr package names to reserve (e.g. `ttc-mcp` / `toronto-transit-mcp`) consistent with go-planner's tag-triggered dual-publish pattern.
+- Confirm npm + ghcr package names to reserve (e.g. `ttc-mcp` / `toronto-transit-mcp`) consistent with go-planner's tag-triggered dual-publish pattern. **✓ SETTLED (ticket 004): `ttc-mcp` on both npm and ghcr (`ghcr.io/emilsoleymani/ttc-mcp`).**
+
+**Remaining to fully resolve 002 (HITL, non-blocking):** wire up Vercel — connect the repo + create the project. No auth env var needed; env vars for the GTFS feed/DB come from ticket 006. Repo creation + initial commit (LICENSE/README/.gitignore + planning docs) are already done and pushed to `main`.
 
 **This is a HITL task** — the user creates the repo and connects Vercel. Provide a precise checklist. Record the resulting repo URL and Vercel project URL as the resolution so downstream tickets can reference them.
 

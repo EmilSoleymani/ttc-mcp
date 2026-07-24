@@ -21,6 +21,7 @@ A complete technical spec and TTC data-source research report for a **TTC (Toron
 
 ## Decisions so far
 
+- [Grilling: Stack Baseline & Deltas from go-planner](tickets/004-stack-baseline.md) — **clone go-planner wholesale**: all five specs (architecture, test, CI/CD, Docker, caching) + Node `[20,22]` inherited **verbatim** (full record in [docs/spec/stack-baseline.md](../docs/spec/stack-baseline.md)). Confirmed deltas: **protobuf dep forced** (JSON approach dropped), GTFS-ingestion deps, **no API-key secret**, **+GTFS-refresh workflow** (shape TBD in 006), +GTFS/protobuf test fixtures, 6h schedule-TTL moot (schedules are a local DB now). Identity **`ttc-mcp`** on npm + ghcr → **closes ticket 002's package-name item**. Hosting: Vercel + Docker both first-class; `.db`-vs-Vercel-budget measurement (ticket 006) decides bake-in vs. Turso.
 - [Research: TTC Feed & API Inventory](tickets/001-ttc-feed-inventory.md) — **GTFS-RT is protobuf-only** (`?format=json` ignored → protobuf dep forced); **TripUpdates carry real epoch-time predictions** (no unofficial API needed); **`transfers.txt`, fare_attributes/fare_rules, frequencies are ABSENT** (calendar/calendar_dates/shapes present → forces proximity/interchange transfer model + no GTFS fare data); **two merged all-modes datasets** (35 MB `opendata_ttc_schedules.zip` ~6-wk vs. 81 MB `completegtfs.zip` quarterly); **NO subway real-time** — vehicles/trip-updates are bus+streetcar only, subway is Alerts + schedule only. Open risk: OGL-Toronto vs. CKAN `notspecified` license discrepancy; RT terms/rate-limits undocumented.
 - [Research: GTFS Static Ingestion & Query Approaches](tickets/003-gtfs-ingestion-research.md) — lean **`node-gtfs`/better-sqlite3 → read-only SQLite baked into the deploy artifact, cron rebuild-and-redeploy** for the ~6-week refresh; one query codepath across Docker (writable FS) and Vercel (read-only bundle). Fallback **Turso/libSQL** if the derived `.db` won't fit. RAPTOR/CSA trip-planning wants a separate in-memory timetable substrate (→ ticket 009, likely Docker-first). Hard constraint: better-sqlite3 works on Vercel Hobby only if compiled at build & queried read-only; **open unknown = derived `.db` size vs. Vercel bundle/cold-start budget — ticket 006 must measure it.**
 
@@ -44,10 +45,9 @@ A complete technical spec and TTC data-source research report for a **TTC (Toron
 
 ### Frontier (unblocked, open)
 
-- [Task: Create ttc-mcp Repo & Deployment](tickets/002-create-repo.md) — HITL, user runs
-- [Grilling: Stack Baseline & Deltas from go-planner](tickets/004-stack-baseline.md) — HITL
-- [Grilling: MCP Tool & Primitive Roster](tickets/005-tool-roster.md) — **now unblocked** (001 resolved)
-- [Grilling: GTFS Ingestion & Storage Design](tickets/006-ingestion-storage-design.md) — **now unblocked** (001 + 003 resolved)
+- [Task: Create ttc-mcp Repo & Deployment](tickets/002-create-repo.md) — HITL; repo + initial commit done, **only Vercel wiring remains** (package name settled by 004)
+- [Grilling: MCP Tool & Primitive Roster](tickets/005-tool-roster.md) — unblocked (001 resolved)
+- [Grilling: GTFS Ingestion & Storage Design](tickets/006-ingestion-storage-design.md) — unblocked (001 + 003 resolved)
 
 ### Blocked (open, waiting)
 
@@ -57,5 +57,6 @@ A complete technical spec and TTC data-source research report for a **TTC (Toron
 
 ### Resolved
 
+- [Grilling: Stack Baseline & Deltas from go-planner](tickets/004-stack-baseline.md) — clone go-planner verbatim + confirmed deltas; identity `ttc-mcp`; hosting decision deferred to 006 ([docs/spec/stack-baseline.md](../docs/spec/stack-baseline.md))
 - [Research: TTC Feed & API Inventory](tickets/001-ttc-feed-inventory.md) — protobuf-only RT, real predictions, NO transfers.txt/fares/subway-RT, two datasets (35/81 MB); license discrepancy flagged
 - [Research: GTFS Static Ingestion & Query Approaches](tickets/003-gtfs-ingestion-research.md) — lean node-gtfs/SQLite baked into deploy, Turso fallback; open unknown = derived `.db` size vs. Vercel budget (ticket 006 to measure)

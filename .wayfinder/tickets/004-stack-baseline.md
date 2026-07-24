@@ -2,7 +2,7 @@
 id: "004"
 title: "Grilling: Stack Baseline & Deltas from go-planner"
 type: grilling
-status: open
+status: resolved
 blocked_by: []
 blocks: []
 ---
@@ -21,3 +21,10 @@ Confirm, per go-planner spec, which are **adopted verbatim** vs. **adapted**:
 **Deliverable:** a short `docs/spec/stack-baseline.md` (in the ttc-mcp repo) that says "inherits go-planner's X spec, with these deltas: …" for each of the five, so nothing is silently assumed. Anything still unknown links to the ticket that will resolve it.
 
 ## Answer
+
+Grilled 2026-07-23. Full spec: [`../../docs/spec/stack-baseline.md`](../../docs/spec/stack-baseline.md).
+
+- **All five go-planner specs inherited VERBATIM** (architecture, test, CI/CD, Docker, caching/retry), plus Node baseline verbatim (≥20, CI `[20,22]`) — the table in the spec is accepted as-is.
+- **Confirmed deltas:** (1) **protobuf dependency forced** (RT is protobuf-only) — go-planner's JSON approach dropped; (2) **GTFS-ingestion deps** (node-gtfs/better-sqlite3, per 003/006); (3) **no `*_API_KEY` secret** — the whole secret block is dropped (TTC feeds keyless); (4) **GTFS-refresh workflow** added for the ~6-week feed update (shape TBD in 006); (5) test fixtures gain a GTFS ZIP + protobuf RT fixture; (6) caching's 6h schedule-TTL is moot (schedules are a local ingested DB now — freshness governed by the refresh model, not an HTTP TTL).
+- **Identity:** npm + ghcr name **`ttc-mcp`** (`ghcr.io/emilsoleymani/ttc-mcp`), `v*`-tag dual-publish inherited. **→ closes the last open item on ticket 002 (package names).**
+- **Hosting:** both Vercel Hobby + Docker stay **first-class**; the derived-`.db`-size-vs-Vercel-budget measurement in **ticket 006** decides bake-in vs. Turso fallback. Recorded as a watch-item; fallback posture if bake-in dies = Docker-first/Vercel-best-effort (not decided today).
