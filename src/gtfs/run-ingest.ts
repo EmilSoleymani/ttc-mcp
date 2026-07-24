@@ -2,23 +2,38 @@ import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createClient } from "@libsql/client";
+import { type Client, createClient } from "@libsql/client";
 import { parse } from "csv-parse";
 import unzipper from "unzipper";
 
 import {
   type CsvRow,
+  DEFAULT_MERGED_URL,
   DEFAULT_SCHEDULES_URL,
   loadTable,
+  MERGED_TABLE_SPECS,
   TABLE_SPECS,
 } from "./ingest.js";
 import { applySchema } from "./schema.js";
+import {
+  buildPathwayTransfers,
+  buildStationTransfers,
+  buildStreetTransfers,
+  insertTransfers,
+  mergeTransfers,
+  type PathwayIdentity,
+  type StopIdentity,
+} from "./transfers.js";
 
 export interface IngestOptions {
   /** Feed URL to download (default DEFAULT_SCHEDULES_URL). Ignored if zipPath is set. */
   schedulesUrl?: string;
   /** Local zip path to ingest instead of downloading (offline). */
   zipPath?: string;
+  /** Dataset B feed URL, for pathways/levels only (default DEFAULT_MERGED_URL). Ignored if mergedZipPath is set. */
+  mergedUrl?: string;
+  /** Local Dataset B zip path instead of downloading (offline). */
+  mergedZipPath?: string;
   /** libSQL connection: `file:...` (local/Docker) or `libsql://...turso.io` (Turso). */
   dbUrl: string;
   authToken?: string;
@@ -50,16 +65,71 @@ function parsedRecords(
   );
 }
 
+async function loadZip(
+  zipPath: string,
+  specs: typeof TABLE_SPECS,
+  client: Client,
+  counts: Record<string, number>,
+): Promise<void> {
+  const directory = await unzipper.Open.file(zipPath);
+  for (const spec of specs) {
+    const entry = directory.files.find((f) => f.path === spec.file);
+    if (!entry) {
+      throw new Error(`GTFS feed is missing ${spec.file}`);
+    }
+    counts[spec.table] = await loadTable(
+      client,
+      spec,
+      parsedRecords(entry.stream()),
+    );
+  }
+}
+
+async function fetchStopIdentities(client: Client): Promise<StopIdentity[]> {
+  const result = await client.execute(
+    "SELECT stop_id, parent_station, stop_lat, stop_lon FROM stops",
+  );
+  return result.rows.map((row) => ({
+    stop_id: Number(row.stop_id),
+    parent_station:
+      row.parent_station === null ? null : Number(row.parent_station),
+    stop_lat: row.stop_lat === null ? null : Number(row.stop_lat),
+    stop_lon: row.stop_lon === null ? null : Number(row.stop_lon),
+  }));
+}
+
+async function fetchPathwayIdentities(
+  client: Client,
+): Promise<PathwayIdentity[]> {
+  const result = await client.execute(
+    "SELECT from_stop_id, to_stop_id, is_bidirectional, traversal_time, length FROM pathways",
+  );
+  return result.rows.map((row) => ({
+    from_stop_id: Number(row.from_stop_id),
+    to_stop_id: Number(row.to_stop_id),
+    is_bidirectional:
+      row.is_bidirectional === null ? null : Number(row.is_bidirectional),
+    traversal_time:
+      row.traversal_time === null ? null : Number(row.traversal_time),
+    length: row.length === null ? null : Number(row.length),
+  }));
+}
+
 /**
- * Full-rebuild ingest: fetch Dataset A (or use a local zip), stream each GTFS
- * file into the optimized libSQL schema (stop_times is streamed, never
- * buffered), return per-table row counts. IO orchestration — verified by the
+ * Full-rebuild ingest: fetch Dataset A (schedule tables) and Dataset B
+ * (pathways/levels only), stream each GTFS file into the optimized libSQL
+ * schema (stop_times is streamed, never buffered), then synthesize the
+ * transfers table (station/pathway/street) from the just-loaded stops +
+ * pathways. Returns per-table row counts. IO orchestration — verified by the
  * real ingest run and the smoke workflow, not the unit gate.
  */
 export async function runIngest(options: IngestOptions): Promise<IngestResult> {
   const zipPath =
     options.zipPath ??
     (await downloadToTemp(options.schedulesUrl ?? DEFAULT_SCHEDULES_URL));
+  const mergedZipPath =
+    options.mergedZipPath ??
+    (await downloadToTemp(options.mergedUrl ?? DEFAULT_MERGED_URL));
 
   const client = createClient(
     options.authToken !== undefined
@@ -69,19 +139,21 @@ export async function runIngest(options: IngestOptions): Promise<IngestResult> {
 
   try {
     await applySchema(client);
-    const directory = await unzipper.Open.file(zipPath);
     const counts: Record<string, number> = {};
-    for (const spec of TABLE_SPECS) {
-      const entry = directory.files.find((f) => f.path === spec.file);
-      if (!entry) {
-        throw new Error(`GTFS feed is missing ${spec.file}`);
-      }
-      counts[spec.table] = await loadTable(
-        client,
-        spec,
-        parsedRecords(entry.stream()),
-      );
-    }
+    await loadZip(zipPath, TABLE_SPECS, client, counts);
+    await loadZip(mergedZipPath, MERGED_TABLE_SPECS, client, counts);
+
+    const [stops, pathways] = await Promise.all([
+      fetchStopIdentities(client),
+      fetchPathwayIdentities(client),
+    ]);
+    const transfers = mergeTransfers(
+      buildStationTransfers(stops),
+      buildPathwayTransfers(pathways),
+      buildStreetTransfers(stops),
+    );
+    counts.transfers = await insertTransfers(client, transfers);
+
     return { counts };
   } finally {
     client.close();
