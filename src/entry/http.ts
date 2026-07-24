@@ -8,9 +8,13 @@ import {
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
+import { resolveQueryClient } from "../gtfs/db-client.js";
 import { buildServer } from "../server.js";
 
 const port = Number(process.env.PORT ?? 3000);
+// One shared read client for the process — @libsql/client connections are
+// safe for concurrent use, so this isn't re-resolved per request.
+const db = resolveQueryClient();
 
 function methodNotAllowed(res: ServerResponse): void {
   res.writeHead(405, { "content-type": "application/json" }).end(
@@ -42,7 +46,7 @@ async function handleMcp(
     return;
   }
 
-  const mcpServer = buildServer();
+  const mcpServer = buildServer({ db });
   const transport = new StreamableHTTPServerTransport({});
   res.on("close", () => {
     void transport.close();
