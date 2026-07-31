@@ -94,7 +94,9 @@ export function secondsSinceServiceMidnight(
   date: ServiceDate,
   instant: Date,
 ): number {
-  return Math.floor((instant.getTime() - midnightInstant(date).getTime()) / 1000);
+  return Math.floor(
+    (instant.getTime() - midnightInstant(date).getTime()) / 1000,
+  );
 }
 
 /** The UTC instant for a GTFS seconds-since-midnight time on a service date
