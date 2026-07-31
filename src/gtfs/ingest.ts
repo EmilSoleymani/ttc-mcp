@@ -171,6 +171,53 @@ export const MERGED_TABLE_SPECS: readonly TableSpec[] = [
   },
 ];
 
+/**
+ * Overlays Dataset B's station hierarchy onto the Dataset-A `stops` table.
+ * Dataset A leaves location_type/parent_station empty; Dataset B carries the
+ * full model and its platform rows reuse Dataset A's stop_ids. Streams B's
+ * stops into a transient `stops_b` table, links matching platforms
+ * (UPDATE), inserts the location_type=1 station parent rows Dataset A lacks
+ * (INSERT), then drops the staging table. Returns affected-row counts.
+ */
+export async function enrichStationsFromDatasetB(
+  client: Client,
+  bStops: AsyncIterable<CsvRow>,
+): Promise<{ platformsLinked: number; stationsInserted: number }> {
+  const stopsSpec = TABLE_SPECS.find((s) => s.table === "stops");
+  if (!stopsSpec) throw new Error("stops spec missing");
+
+  await client.execute("DROP TABLE IF EXISTS stops_b");
+  await client.execute(
+    `CREATE TABLE stops_b (
+       stop_id INTEGER PRIMARY KEY, stop_code INTEGER, stop_name TEXT,
+       stop_lat REAL, stop_lon REAL, parent_station INTEGER, location_type INTEGER
+     )`,
+  );
+  await loadTable(client, { ...stopsSpec, table: "stops_b" }, bStops);
+
+  const linked = await client.execute(
+    `UPDATE stops
+        SET location_type =
+              (SELECT b.location_type FROM stops_b b WHERE b.stop_id = stops.stop_id),
+            parent_station =
+              (SELECT b.parent_station FROM stops_b b WHERE b.stop_id = stops.stop_id)
+      WHERE stop_id IN (SELECT stop_id FROM stops_b)`,
+  );
+  const inserted = await client.execute(
+    `INSERT INTO stops (stop_id, stop_code, stop_name, stop_lat, stop_lon, parent_station, location_type)
+     SELECT stop_id, stop_code, stop_name, stop_lat, stop_lon, parent_station, location_type
+       FROM stops_b
+      WHERE location_type = 1
+        AND stop_id NOT IN (SELECT stop_id FROM stops)`,
+  );
+
+  await client.execute("DROP TABLE IF EXISTS stops_b");
+  return {
+    platformsLinked: Number(linked.rowsAffected),
+    stationsInserted: Number(inserted.rowsAffected),
+  };
+}
+
 // Rows per multi-row INSERT. stop_times has 5 cols → 2,500 bound params/stmt,
 // well under SQLite's variable limit.
 const CHUNK_ROWS = 500;
