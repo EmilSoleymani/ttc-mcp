@@ -88,7 +88,7 @@ async function loadZip(
 
 async function fetchStopIdentities(client: Client): Promise<StopIdentity[]> {
   const result = await client.execute(
-    "SELECT stop_id, parent_station, stop_lat, stop_lon FROM stops",
+    "SELECT stop_id, parent_station, stop_lat, stop_lon, location_type FROM stops",
   );
   return result.rows.map((row) => ({
     stop_id: Number(row.stop_id),
@@ -96,6 +96,8 @@ async function fetchStopIdentities(client: Client): Promise<StopIdentity[]> {
       row.parent_station === null ? null : Number(row.parent_station),
     stop_lat: row.stop_lat === null ? null : Number(row.stop_lat),
     stop_lon: row.stop_lon === null ? null : Number(row.stop_lon),
+    location_type:
+      row.location_type === null ? null : Number(row.location_type),
   }));
 }
 

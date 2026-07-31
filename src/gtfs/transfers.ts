@@ -19,6 +19,7 @@ export interface StopIdentity {
   parent_station: number | null;
   stop_lat: number | null;
   stop_lon: number | null;
+  location_type: number | null;
 }
 
 export interface PathwayIdentity {
@@ -198,9 +199,12 @@ export function buildStreetTransfers(
   radiusM = STREET_RADIUS_M,
   walkSpeedMps = WALK_SPEED_MPS,
 ): TransferRow[] {
+  // location_type === 1 rows are non-boardable station parents (Dataset B's
+  // station hierarchy) — they carry lat/lon but no vehicle ever stops there,
+  // so they're excluded from street transfers.
   const located = stops.filter(
     (s): s is StopIdentity & { stop_lat: number; stop_lon: number } =>
-      s.stop_lat !== null && s.stop_lon !== null,
+      s.location_type !== 1 && s.stop_lat !== null && s.stop_lon !== null,
   );
   if (located.length === 0) return [];
 
