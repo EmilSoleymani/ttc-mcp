@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   absoluteTimeFor,
   addDays,
+  secondsSinceServiceMidnight,
   serviceDateAt,
   toIsoWithTorontoOffset,
   toYyyymmdd,
@@ -63,5 +64,34 @@ describe("service-time", () => {
   it("reports the weekday matching calendar's column convention (0=Sunday)", () => {
     // 2026-07-24 is a Friday.
     expect(weekdayOf({ year: 2026, month: 7, day: 24 })).toBe(5);
+  });
+
+  describe("secondsSinceServiceMidnight", () => {
+    it("returns seconds since Toronto service-midnight for a same-day instant", () => {
+      // 15:00 EDT is 54000s after 00:00 EDT on the same service date.
+      const s = secondsSinceServiceMidnight(
+        { year: 2026, month: 7, day: 24 },
+        new Date("2026-07-24T15:00:00-04:00"),
+      );
+      expect(s).toBe(54000);
+    });
+
+    it("is negative when the instant precedes the service date's midnight (next-day window)", () => {
+      // Service date 07-25, instant on 07-24 → before that midnight.
+      const s = secondsSinceServiceMidnight(
+        { year: 2026, month: 7, day: 25 },
+        new Date("2026-07-24T15:00:00-04:00"),
+      );
+      expect(s).toBeLessThan(0);
+    });
+
+    it("exceeds 86400 for a prior service date's post-midnight window", () => {
+      // Service date 07-23, instant 07-24T15:00 → 39h = 140400s.
+      const s = secondsSinceServiceMidnight(
+        { year: 2026, month: 7, day: 23 },
+        new Date("2026-07-24T15:00:00-04:00"),
+      );
+      expect(s).toBe(140400);
+    });
   });
 });

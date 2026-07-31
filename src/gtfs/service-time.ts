@@ -86,6 +86,17 @@ function midnightInstant(date: ServiceDate): Date {
   return new Date(guess - offsetMs);
 }
 
+/** Seconds after `date`'s America/Toronto service-midnight at which a GTFS
+ * `dep` (seconds-since-midnight) is still at/after `instant`. Floored — a
+ * safe lower bound to pair with an exact JS `absolute >= when` filter.
+ * Negative when `instant` precedes the date's midnight (the +1-day window). */
+export function secondsSinceServiceMidnight(
+  date: ServiceDate,
+  instant: Date,
+): number {
+  return Math.floor((instant.getTime() - midnightInstant(date).getTime()) / 1000);
+}
+
 /** The UTC instant for a GTFS seconds-since-midnight time on a service date
  * — past-24:00:00 GTFS times (e.g. 25:10:00) resolve to the correct
  * next-day instant, since they're just added past the date's midnight. */
