@@ -36,11 +36,11 @@ describe("enrichStationsFromDatasetB", () => {
           location_type: "",
         },
         {
-          stop_id: "662",
-          stop_code: "662",
-          stop_name: "Danforth at Kennedy",
-          stop_lat: "43.7",
-          stop_lon: "-79.2",
+          stop_id: "3765",
+          stop_code: "3765",
+          stop_name: "Islington Ave at Beaumonde",
+          stop_lat: "43.6",
+          stop_lon: "-79.5",
           parent_station: "",
           location_type: "",
         },
@@ -51,11 +51,15 @@ describe("enrichStationsFromDatasetB", () => {
     client.close();
   });
 
-  it("links platforms and inserts station rows from Dataset B", async () => {
+  it("links platforms by stop_code (not stop_id) and inserts station rows", async () => {
     const result = await enrichStationsFromDatasetB(
       client,
       // Dataset-B style stops.txt rows (extra columns present in the real feed
-      // are ignored by the stops spec's mapRow).
+      // are ignored by the stops spec's mapRow). The two TTC feeds use
+      // independent stop_id namespaces — stop_id 3765 collides here between
+      // an unrelated Eglinton bus bay (B) and Islington Ave (A), but their
+      // stop_codes differ, so the join must use stop_code to avoid stapling
+      // the wrong parent_station onto Islington.
       asRecords([
         {
           stop_id: "99993",
@@ -76,24 +80,41 @@ describe("enrichStationsFromDatasetB", () => {
           location_type: "0",
         },
         {
-          stop_id: "662",
-          stop_code: "662",
-          stop_name: "Danforth at Kennedy",
+          stop_id: "3765",
+          stop_code: "90001",
+          stop_name: "Eglinton Station Bus Bay 3",
           stop_lat: "43.7",
-          stop_lon: "-79.2",
+          stop_lon: "-79.4",
+          parent_station: "99993",
+          location_type: "0",
+        },
+        {
+          stop_id: "7988",
+          stop_code: "3765",
+          stop_name: "Islington Ave at Beaumonde",
+          stop_lat: "43.6",
+          stop_lon: "-79.5",
           parent_station: "",
           location_type: "0",
         },
       ]),
     );
 
-    expect(result).toEqual({ platformsLinked: 2, stationsInserted: 1 });
+    expect(result).toEqual({ platformsLinked: 1, stationsInserted: 1 });
 
     const platform = await client.execute({
-      sql: "SELECT parent_station, location_type FROM stops WHERE stop_id = 16073",
+      sql: "SELECT parent_station FROM stops WHERE stop_id = 16073",
     });
     expect(Number(platform.rows[0]!.parent_station)).toBe(99993);
-    expect(Number(platform.rows[0]!.location_type)).toBe(0);
+
+    // Anti-collision: stop_id 3765 collides across feeds, but stop_code 3765
+    // correctly matches the parentless B Islington row, not the bus-bay that
+    // shares Islington's Dataset-A stop_id. A stop_id join would wrongly set
+    // this to 99993.
+    const islington = await client.execute({
+      sql: "SELECT parent_station FROM stops WHERE stop_id = 3765",
+    });
+    expect(islington.rows[0]!.parent_station).toBeNull();
 
     const station = await client.execute({
       sql: "SELECT location_type, stop_name FROM stops WHERE stop_id = 99993",
