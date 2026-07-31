@@ -5,6 +5,7 @@ import type { StopDetail, StopSummary } from "../schemas/stop.js";
 import {
   addDays,
   absoluteTimeFor,
+  secondsSinceServiceMidnight,
   type ServiceDate,
   serviceDateAt,
   toIsoWithTorontoOffset,
@@ -62,16 +63,13 @@ interface RawDeparture {
   direction_id: number | null;
 }
 
-// Per-(stop set, service date) cap on fetched rows, well above any real
-// stop's daily departure count — the anti-dump cap is applied after
-// merging + sorting across candidate dates, not here.
-const CANDIDATE_CEILING = 500;
-
 async function fetchDepartureRows(
   client: Client,
   stopIds: number[],
   serviceIds: number[],
   routeId: number | undefined,
+  minDep: number,
+  limit: number,
 ): Promise<RawDeparture[]> {
   if (stopIds.length === 0 || serviceIds.length === 0) return [];
   const stopPlaceholders = stopIds.map(() => "?").join(", ");
@@ -87,12 +85,16 @@ async function fetchDepartureRows(
           WHERE st.stop_id IN (${stopPlaceholders})
             AND t.service_id IN (${servicePlaceholders})
             AND st.dep IS NOT NULL
+            AND st.dep >= ?
             ${routeFilter}
-          LIMIT ${String(CANDIDATE_CEILING)}`,
+          ORDER BY st.dep
+          LIMIT ?`,
     args: [
       ...stopIds,
       ...serviceIds,
+      minDep,
       ...(routeId !== undefined ? [routeId] : []),
+      limit,
     ],
   });
   return result.rows.map((row) => ({
@@ -213,11 +215,18 @@ export async function getSchedule(
     const date = addDays(today, offset);
     const serviceIds = await activeServiceIds(client, date);
     if (serviceIds.length > 0) {
+      // Only the earliest `limit + 1` departures at/after `when` for this day
+      // — a windowed indexed fetch, not a blind cap that could chop off the
+      // rest of a busy stop's day. The `+ 1` lets the merged result detect
+      // truncation accurately.
+      const minDep = Math.max(0, secondsSinceServiceMidnight(date, when));
       const rows = await fetchDepartureRows(
         client,
         platformIds,
         serviceIds,
         params.routeId,
+        minDep,
+        limit + 1,
       );
       for (const row of rows) {
         const absolute = absoluteTimeFor(date, row.dep);

@@ -222,4 +222,39 @@ describe("schedule repository", () => {
       "No scheduled service found in the next 14 days.",
     );
   });
+
+  it("returns tonight's remaining departures at a stop busier than the old cap", async () => {
+    // Trip 700 on route 900 (service 1). Give stop 662 a full day of
+    // departures: 600 in the morning (00:00–10:00) plus two in the evening.
+    // The old LIMIT-500 fetch kept only the earliest 500 (all morning), so an
+    // evening query wrongly returned the NEXT day. The windowed fetch must
+    // return 20:00 TODAY.
+    await client.execute({
+      sql: `INSERT INTO trips (trip_id, route_id, service_id, trip_headsign, direction_id, shape_id)
+            VALUES (700, 900, 1, 'Loop', 0, NULL)`,
+    });
+    const rows: string[] = [];
+    const args: number[] = [];
+    for (let i = 0; i < 600; i++) {
+      rows.push("(700, 662, 1, ?, ?)");
+      args.push(i * 60, i * 60); // 00:00:00 .. 09:59:00
+    }
+    rows.push("(700, 662, 1, ?, ?)"); // 20:00:00
+    args.push(72000, 72000);
+    rows.push("(700, 662, 1, ?, ?)"); // 20:30:00
+    args.push(73800, 73800);
+    await client.execute({
+      sql: `INSERT INTO stop_times (trip_id, stop_id, stop_sequence, arr, dep) VALUES ${rows.join(", ")}`,
+      args,
+    });
+
+    const result = await getSchedule(client, {
+      stopId: 662,
+      routeId: 900,
+      when: new Date("2026-07-24T20:00:00-04:00"),
+      limit: 5,
+    });
+    expect(result?.departures[0]?.scheduled_time).toMatch(/^2026-07-24T20:00/);
+    expect(result?.truncated).toBe(true);
+  });
 });
