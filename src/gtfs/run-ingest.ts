@@ -10,6 +10,7 @@ import {
   type CsvRow,
   DEFAULT_MERGED_URL,
   DEFAULT_SCHEDULES_URL,
+  enrichStationsFromDatasetB,
   loadTable,
   MERGED_TABLE_SPECS,
   TABLE_SPECS,
@@ -87,7 +88,7 @@ async function loadZip(
 
 async function fetchStopIdentities(client: Client): Promise<StopIdentity[]> {
   const result = await client.execute(
-    "SELECT stop_id, parent_station, stop_lat, stop_lon FROM stops",
+    "SELECT stop_id, parent_station, stop_lat, stop_lon, location_type FROM stops",
   );
   return result.rows.map((row) => ({
     stop_id: Number(row.stop_id),
@@ -95,6 +96,8 @@ async function fetchStopIdentities(client: Client): Promise<StopIdentity[]> {
       row.parent_station === null ? null : Number(row.parent_station),
     stop_lat: row.stop_lat === null ? null : Number(row.stop_lat),
     stop_lon: row.stop_lon === null ? null : Number(row.stop_lon),
+    location_type:
+      row.location_type === null ? null : Number(row.location_type),
   }));
 }
 
@@ -142,6 +145,20 @@ export async function runIngest(options: IngestOptions): Promise<IngestResult> {
     const counts: Record<string, number> = {};
     await loadZip(zipPath, TABLE_SPECS, client, counts);
     await loadZip(mergedZipPath, MERGED_TABLE_SPECS, client, counts);
+
+    // Overlay Dataset B's station hierarchy (location_type/parent_station)
+    // onto the Dataset-A stops — Dataset A leaves those columns empty.
+    const mergedDir = await unzipper.Open.file(mergedZipPath);
+    const bStopsEntry = mergedDir.files.find((f) => f.path === "stops.txt");
+    if (!bStopsEntry) {
+      throw new Error("Dataset B feed is missing stops.txt");
+    }
+    const enriched = await enrichStationsFromDatasetB(
+      client,
+      parsedRecords(bStopsEntry.stream()),
+    );
+    counts.stops_enriched = enriched.platformsLinked;
+    counts.stations_added = enriched.stationsInserted;
 
     const [stops, pathways] = await Promise.all([
       fetchStopIdentities(client),

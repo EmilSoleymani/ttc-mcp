@@ -171,6 +171,64 @@ export const MERGED_TABLE_SPECS: readonly TableSpec[] = [
   },
 ];
 
+/**
+ * Overlays Dataset B's station hierarchy onto the Dataset-A `stops` table.
+ * Dataset A leaves location_type/parent_station empty; Dataset B carries the
+ * full model. The two feeds use independent stop_id namespaces, so matching
+ * is done on stop_code (the rider-facing pole number) instead. Streams B's
+ * stops into a transient `stops_b` table, links matching platforms
+ * (UPDATE), inserts the location_type=1 station parent rows Dataset A lacks
+ * (INSERT), then drops the staging table. Returns affected-row counts.
+ */
+export async function enrichStationsFromDatasetB(
+  client: Client,
+  bStops: AsyncIterable<CsvRow>,
+): Promise<{ platformsLinked: number; stationsInserted: number }> {
+  const stopsSpec = TABLE_SPECS.find((s) => s.table === "stops");
+  if (!stopsSpec) throw new Error("stops spec missing");
+
+  await client.execute("DROP TABLE IF EXISTS stops_b");
+  await client.execute(
+    `CREATE TABLE stops_b (
+       stop_id INTEGER PRIMARY KEY, stop_code INTEGER, stop_name TEXT,
+       stop_lat REAL, stop_lon REAL, parent_station INTEGER, location_type INTEGER
+     )`,
+  );
+  await loadTable(client, { ...stopsSpec, table: "stops_b" }, bStops);
+  await client.execute("CREATE INDEX ix_stops_b_code ON stops_b(stop_code)");
+
+  // Join A<->B on stop_code, NOT stop_id: the two TTC feeds use independent
+  // stop_id namespaces (the same numeric id names different physical stops),
+  // but stop_code (the rider-facing pole number) is stable across both. Only
+  // B platform rows that carry a parent_station qualify; ORDER BY ... LIMIT 1
+  // makes a duplicate-stop_code match deterministic.
+  const linked = await client.execute(
+    `UPDATE stops
+        SET parent_station = (
+          SELECT b.parent_station FROM stops_b b
+          WHERE b.stop_code = stops.stop_code AND b.parent_station IS NOT NULL
+          ORDER BY b.stop_id LIMIT 1
+        )
+      WHERE stops.stop_code IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM stops_b b
+          WHERE b.stop_code = stops.stop_code AND b.parent_station IS NOT NULL
+        )`,
+  );
+  const inserted = await client.execute(
+    `INSERT INTO stops (stop_id, stop_code, stop_name, stop_lat, stop_lon, parent_station, location_type)
+     SELECT stop_id, stop_code, stop_name, stop_lat, stop_lon, parent_station, location_type
+       FROM stops_b
+      WHERE location_type = 1 AND stop_id NOT IN (SELECT stop_id FROM stops)`,
+  );
+
+  await client.execute("DROP TABLE IF EXISTS stops_b");
+  return {
+    platformsLinked: Number(linked.rowsAffected),
+    stationsInserted: Number(inserted.rowsAffected),
+  };
+}
+
 // Rows per multi-row INSERT. stop_times has 5 cols → 2,500 bound params/stmt,
 // well under SQLite's variable limit.
 const CHUNK_ROWS = 500;
