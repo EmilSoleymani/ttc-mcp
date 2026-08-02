@@ -1,6 +1,7 @@
 import { type Client } from "@libsql/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { unusedRtClient } from "../gtfs-rt/test-support.js";
 import { buildFixtureDb } from "../gtfs/test-support.js";
 import type { ScheduledDeparture } from "../schemas/schedule.js";
 import type { StopSummary } from "../schemas/stop.js";
@@ -12,7 +13,7 @@ describe("get_schedule", () => {
   let deps: ServerDeps;
   beforeEach(async () => {
     db = await buildFixtureDb();
-    deps = { db };
+    deps = { db, rt: unusedRtClient() };
   });
   afterEach(() => {
     db.close();
