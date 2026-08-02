@@ -99,6 +99,23 @@ export class RtClient {
       .map((entity) => entity.vehicle)
       .filter((v): v is transit_realtime.IVehiclePosition => v != null);
   }
+
+  /** Decoded alerts, paired with their FeedEntity id (the Alert protobuf
+   * itself carries no id of its own). Subway-inclusive — unlike vehicles/trip
+   * updates, TTC publishes this feed for all modes. */
+  async getAlerts(): Promise<AlertEntity[]> {
+    const feed = await this.getFeed("alerts");
+    const entities: AlertEntity[] = [];
+    for (const entity of feed.entity) {
+      if (entity.alert) entities.push({ id: entity.id, alert: entity.alert });
+    }
+    return entities;
+  }
+}
+
+export interface AlertEntity {
+  id: string;
+  alert: transit_realtime.IAlert;
 }
 
 /**

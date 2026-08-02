@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { RtClient } from "./gtfs-rt/rt-client.js";
 import { registerResources } from "./resources.js";
+import { registerGetAlerts } from "./tools/get-alerts.js";
 import { registerGetFare } from "./tools/get-fare.js";
 import { registerGetSchedule } from "./tools/get-schedule.js";
 import { registerGetRoute } from "./tools/get-route.js";
@@ -31,6 +32,7 @@ export function registerTools(server: McpServer, deps: ServerDeps): void {
   registerListRoutes(server, deps);
   registerGetRoute(server, deps);
   registerGetVehicles(server, deps);
+  registerGetAlerts(server, deps);
   registerResources(server, deps);
 }
 
