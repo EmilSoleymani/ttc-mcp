@@ -2,6 +2,7 @@ import { createClient } from "@libsql/client";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
+import { RtClient } from "../gtfs-rt/rt-client.js";
 import { applySchema } from "../gtfs/schema.js";
 import { buildServer, type ServerDeps } from "../server.js";
 
@@ -11,11 +12,20 @@ export interface CallToolOutcome {
 }
 
 /** An empty (schema-only) in-memory db — enough for tools/resources that
- * don't exercise GTFS data (get_fare, ttc://fares). */
+ * don't exercise GTFS data (get_fare, ttc://fares) — plus an RT client with
+ * caching disabled and no real fetch, for tools that don't exercise
+ * live data either. */
 async function defaultDeps(): Promise<ServerDeps> {
   const db = createClient({ url: ":memory:" });
   await applySchema(db);
-  return { db };
+  const rt = new RtClient({
+    cacheEnabled: false,
+    fetchImpl: () =>
+      Promise.reject(
+        new Error("Unexpected GTFS-RT fetch in a default test deps."),
+      ),
+  });
+  return { db, rt };
 }
 
 async function withClient<T>(

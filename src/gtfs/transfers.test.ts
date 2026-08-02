@@ -18,9 +18,27 @@ import {
 describe("buildStationTransfers", () => {
   it("connects siblings sharing a parent_station, both directions", () => {
     const transfers = buildStationTransfers([
-      { stop_id: 1, parent_station: 100, stop_lat: null, stop_lon: null },
-      { stop_id: 2, parent_station: 100, stop_lat: null, stop_lon: null },
-      { stop_id: 3, parent_station: null, stop_lat: null, stop_lon: null },
+      {
+        stop_id: 1,
+        parent_station: 100,
+        stop_lat: null,
+        stop_lon: null,
+        location_type: 0,
+      },
+      {
+        stop_id: 2,
+        parent_station: 100,
+        stop_lat: null,
+        stop_lon: null,
+        location_type: 0,
+      },
+      {
+        stop_id: 3,
+        parent_station: null,
+        stop_lat: null,
+        stop_lon: null,
+        location_type: 0,
+      },
     ]);
     expect(transfers).toEqual(
       expect.arrayContaining([
@@ -45,7 +63,13 @@ describe("buildStationTransfers", () => {
 
   it("emits nothing for a parent with a single platform", () => {
     const transfers = buildStationTransfers([
-      { stop_id: 1, parent_station: 100, stop_lat: null, stop_lon: null },
+      {
+        stop_id: 1,
+        parent_station: 100,
+        stop_lat: null,
+        stop_lon: null,
+        location_type: 0,
+      },
     ]);
     expect(transfers).toEqual([]);
   });
@@ -210,18 +234,21 @@ describe("buildStreetTransfers", () => {
     parent_station: null,
     stop_lat: 43.7,
     stop_lon: -79.4,
+    location_type: 0,
   };
   const nearB = {
     stop_id: 2,
     parent_station: null,
     stop_lat: 43.7005,
     stop_lon: -79.4,
+    location_type: 0,
   }; // ~56m away
   const far = {
     stop_id: 3,
     parent_station: null,
     stop_lat: 43.8,
     stop_lon: -79.5,
+    location_type: 0,
   };
 
   it("connects stops within the radius, both directions, excludes far stops", () => {
@@ -255,10 +282,48 @@ describe("buildStreetTransfers", () => {
 
   it("ignores stops with no coordinates", () => {
     const transfers = buildStreetTransfers([
-      { stop_id: 1, parent_station: null, stop_lat: null, stop_lon: null },
+      {
+        stop_id: 1,
+        parent_station: null,
+        stop_lat: null,
+        stop_lon: null,
+        location_type: 0,
+      },
       nearB,
     ]);
     expect(transfers).toEqual([]);
+  });
+
+  it("excludes location_type 1 station parents from street transfers, even when in radius", () => {
+    // A station parent row shares nearA's exact coordinates (Dataset B
+    // station hierarchy enrichment sets lat/lon on the parent), but it's not
+    // boardable — no vehicle stops there, only at its child platforms.
+    const stationParent = {
+      stop_id: 999,
+      parent_station: null,
+      stop_lat: 43.7,
+      stop_lon: -79.4,
+      location_type: 1,
+    };
+    const transfers = buildStreetTransfers([nearA, nearB, stationParent]);
+
+    expect(transfers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          from_stop_id: 1,
+          to_stop_id: 2,
+          type: "street",
+        }),
+        expect.objectContaining({
+          from_stop_id: 2,
+          to_stop_id: 1,
+          type: "street",
+        }),
+      ]),
+    );
+    expect(
+      transfers.some((t) => t.from_stop_id === 999 || t.to_stop_id === 999),
+    ).toBe(false);
   });
 });
 
