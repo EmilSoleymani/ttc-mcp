@@ -100,6 +100,15 @@ export class RtClient {
       .filter((v): v is transit_realtime.IVehiclePosition => v != null);
   }
 
+  /** Decoded TripUpdates from the `trips` feed (the arrival-prediction feed
+   * `get_arrivals` consumes). Mirrors `getVehiclePositions`. */
+  async getTripUpdates(): Promise<transit_realtime.ITripUpdate[]> {
+    const feed = await this.getFeed("trips");
+    return feed.entity
+      .map((entity) => entity.tripUpdate)
+      .filter((t): t is transit_realtime.ITripUpdate => t != null);
+  }
+
   /** Decoded alerts, paired with their FeedEntity id (the Alert protobuf
    * itself carries no id of its own). Subway-inclusive — unlike vehicles/trip
    * updates, TTC publishes this feed for all modes. */

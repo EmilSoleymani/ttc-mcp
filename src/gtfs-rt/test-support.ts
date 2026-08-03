@@ -80,6 +80,75 @@ export function fixtureVehiclesRtClient(
   });
 }
 
+export interface FixtureStopTimeUpdate {
+  stopId: string;
+  /** Predicted arrival epoch seconds (falls back to `departure` per spec). */
+  arrivalSeconds?: number;
+  departureSeconds?: number;
+}
+
+export interface FixtureTripUpdate {
+  tripId?: string;
+  routeId?: string;
+  stopTimeUpdates?: FixtureStopTimeUpdate[];
+}
+
+/** Encodes a captured-shape TripUpdates FeedMessage (protobuf bytes), the
+ * wire format `bustime.ttc.ca/gtfsrt/trips` serves, for use as a fake `fetch`
+ * body in tests (mirrors `encodeVehiclePositionsFeed`). */
+export function encodeTripUpdatesFeed(
+  tripUpdates: FixtureTripUpdate[],
+): Uint8Array {
+  const message = GtfsRt.FeedMessage.create({
+    header: {
+      gtfsRealtimeVersion: "2.0",
+      incrementality: GtfsRt.FeedHeader.Incrementality.FULL_DATASET,
+      timestamp: Math.floor(Date.now() / 1000),
+    },
+    entity: tripUpdates.map((t, i) => ({
+      id: `entity-${String(i)}`,
+      tripUpdate: {
+        // `trip` is a required field on TripUpdate (unlike the optional
+        // `trip` on VehiclePosition) — always emit a descriptor, even when
+        // both ids are absent.
+        trip: { routeId: t.routeId ?? null, tripId: t.tripId ?? null },
+        stopTimeUpdate: (t.stopTimeUpdates ?? []).map((stu) => ({
+          stopId: stu.stopId,
+          arrival:
+            stu.arrivalSeconds !== undefined
+              ? { time: stu.arrivalSeconds }
+              : null,
+          departure:
+            stu.departureSeconds !== undefined
+              ? { time: stu.departureSeconds }
+              : null,
+        })),
+      },
+    })),
+  });
+  return GtfsRt.FeedMessage.encode(message).finish();
+}
+
+/** An RtClient whose `trips` feed fetch resolves to the given fixture trip
+ * updates, encoded on the fly — no network access. */
+export function fixtureTripUpdatesRtClient(
+  tripUpdates: FixtureTripUpdate[],
+  options: RtClientOptions = {},
+): RtClient {
+  const body = encodeTripUpdatesFeed(tripUpdates);
+  return new RtClient({
+    cacheEnabled: false,
+    fetchImpl: () =>
+      Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { "content-type": "application/x-protobuf" },
+        }),
+      ),
+    ...options,
+  });
+}
+
 export interface FixtureAlertEntity {
   routeId?: string;
   stopId?: string;
