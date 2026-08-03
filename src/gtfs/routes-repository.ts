@@ -8,6 +8,7 @@ import type {
 import type { Mode, RouteSummary } from "../schemas/stop.js";
 import {
   asText,
+  modeForRouteType,
   rowsFrom,
   type StopRoute,
   toRouteSummary,
@@ -40,6 +41,25 @@ export async function listRoutes(
   );
   const routes = rowsFromRoutes(result).map(toRouteSummary);
   return mode === undefined ? routes : routes.filter((r) => r.mode === mode);
+}
+
+/** `route_id -> mode` for the full catalog (bounded, ~233 routes) — the
+ * static-catalog half of the RT alert join (docs/spec/realtime-integration.md
+ * #4 "Static <-> RT join"): a GTFS-RT `EntitySelector` usually carries only a
+ * `route_id`, not a `route_type`, so `get_alerts` resolves each informed
+ * route's mode from here rather than the RT feed itself. */
+export async function routeModeIndex(
+  client: Client,
+): Promise<Map<string, Mode>> {
+  const result = await client.execute(
+    "SELECT route_id, route_type FROM routes",
+  );
+  const index = new Map<string, Mode>();
+  for (const row of result.rows) {
+    const routeId = String(Number(row.route_id));
+    index.set(routeId, modeForRouteType(Number(row.route_type)));
+  }
+  return index;
 }
 
 // GTFS technically allows a null trips.direction_id; TTC's feed doesn't

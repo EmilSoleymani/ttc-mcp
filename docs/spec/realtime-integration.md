@@ -40,7 +40,7 @@ Arrival { route_id, route_short_name, headsign, direction_id,
 **Subway / no-live-data fallback (the unified-tool behaviour):** `get_arrivals` looks up the stop's `mode` from the catalog. For a **subway** stop — or any stop with no matching RT trips in the window — it serves the next scheduled departures from the ticket-007 `get_schedule` query path, with `realtime:false`, `source:"scheduled"`. `realtime_available` on the envelope reflects whether *any* RT prediction was found. The tool therefore always answers.
 
 **Alerts → `get_alerts(mode?, route_id?, stop_id?, category?)`**
-Filter decoded alerts by `informed_entity` (`route_id`/`stop_id`/mode) and derived `category`. Subway-inclusive. Map `cause`/`effect`/`severity_level`; derive `category` (`elevator | escalator | detour | delay | no_service | planned`) from effect + header text. `Alert` shape per ticket 007. Small feed — cached under the same TTL.
+Filter decoded alerts by `informed_entity` (`route_id`/`stop_id`/mode) and derived `category`. Subway-inclusive. Map `cause`/`effect`/`severity_level`; derive `category` (`elevator | escalator | detour | delay | no_service | planned | other`) from effect + header text — for TTC this is text-driven, as the feed sets `effect = UNKNOWN_EFFECT` on every alert; `other` is the neutral residual for a notice with no confident signal, and `stop_id` participates in mode resolution so a subway-station alert surfaces under `mode: subway`. `Alert` shape per ticket 007. Small feed — cached under the same TTL.
 
 ### 4. Static ↔ RT join (dependency on ticket 006 query layer)
 

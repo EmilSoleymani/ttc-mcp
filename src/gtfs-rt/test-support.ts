@@ -148,3 +148,89 @@ export function fixtureTripUpdatesRtClient(
     ...options,
   });
 }
+
+export interface FixtureAlertEntity {
+  routeId?: string;
+  stopId?: string;
+  routeType?: number;
+}
+
+export interface FixtureAlertPeriod {
+  start?: number;
+  end?: number;
+}
+
+export interface FixtureAlert {
+  id: string;
+  headerText?: string;
+  descriptionText?: string;
+  cause?: transit_realtime.Alert.Cause;
+  effect?: transit_realtime.Alert.Effect;
+  severityLevel?: transit_realtime.Alert.SeverityLevel;
+  informedEntity?: FixtureAlertEntity[];
+  activePeriod?: FixtureAlertPeriod[];
+  url?: string;
+}
+
+/** Encodes a captured-shape Alerts FeedMessage (protobuf bytes), the same
+ * wire format the real `bustime.ttc.ca/gtfsrt/alerts` feed serves, for use as
+ * a fake `fetch` response body in tests. */
+export function encodeAlertsFeed(alerts: FixtureAlert[]): Uint8Array {
+  const message = GtfsRt.FeedMessage.create({
+    header: {
+      gtfsRealtimeVersion: "2.0",
+      incrementality: GtfsRt.FeedHeader.Incrementality.FULL_DATASET,
+      timestamp: Math.floor(Date.now() / 1000),
+    },
+    entity: alerts.map((a) => ({
+      id: a.id,
+      alert: {
+        cause: a.cause ?? null,
+        effect: a.effect ?? null,
+        severityLevel: a.severityLevel ?? null,
+        headerText:
+          a.headerText !== undefined
+            ? { translation: [{ text: a.headerText, language: "en" }] }
+            : null,
+        descriptionText:
+          a.descriptionText !== undefined
+            ? { translation: [{ text: a.descriptionText, language: "en" }] }
+            : null,
+        url:
+          a.url !== undefined
+            ? { translation: [{ text: a.url, language: "en" }] }
+            : null,
+        informedEntity: (a.informedEntity ?? []).map((e) => ({
+          routeId: e.routeId ?? null,
+          stopId: e.stopId ?? null,
+          routeType: e.routeType ?? null,
+        })),
+        activePeriod: (a.activePeriod ?? []).map((p) => ({
+          start: p.start ?? null,
+          end: p.end ?? null,
+        })),
+      },
+    })),
+  });
+  return GtfsRt.FeedMessage.encode(message).finish();
+}
+
+/** An RtClient whose `alerts` feed fetch resolves to the given fixture
+ * alerts, encoded on the fly — no network access. */
+export function fixtureAlertsRtClient(
+  alerts: FixtureAlert[],
+  options: RtClientOptions = {},
+): RtClient {
+  const body = encodeAlertsFeed(alerts);
+  return new RtClient({
+    cacheEnabled: false,
+    fetchImpl: () =>
+      Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: { "content-type": "application/x-protobuf" },
+        }),
+      ),
+    ...options,
+  });
+}
