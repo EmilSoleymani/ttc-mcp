@@ -39,7 +39,7 @@ RouteSummary { route_id, route_short_name, route_long_name, mode, color? }
 
 **7. `get_vehicles`** — `{ route_id, limit? }` → `{ route_id, vehicles: Vehicle[], realtime_available: boolean }`. Server-side filtered by route. `Vehicle { vehicle_id, lat, lon, bearing?, trip_id?, headsign?, timestamp }`. **Subway routes → `vehicles: [], realtime_available: false`** with a `note` (no subway RT).
 
-**8. `get_alerts`** — `{ mode?, route_id?, stop_id?, category?, limit? }` → `{ alerts: Alert[], truncated }`. Subway-inclusive. `Alert { id, header, description?, severity?, cause?, effect?, category, informed: {routes?, stops?, modes?}, active_period?, url? }`. `category` includes `elevator | escalator | detour | delay | no_service | planned`.
+**8. `get_alerts`** — `{ mode?, route_id?, stop_id?, category?, limit? }` → `{ alerts: Alert[], truncated }`. Subway-inclusive. `Alert { id, header, description?, severity?, cause?, effect?, category, informed: {routes?, stops?, modes?}, active_period?, url? }`. `category` includes `elevator | escalator | detour | delay | no_service | planned | other` (`other` = a notice with no confident effect/text signal, e.g. a fare/safety notice — not asserted to be a concrete `detour`).
 
 **9. `get_fare`** — `{ category?, fare_type? }` → `{ fares: Fare[], transfer: {window_minutes: 120, rules: string}, notes?, source_url }`. Hand-maintained static table. `Fare { category: "adult"|"senior"|"youth"|"child", fare_type: "presto"|"cash"|"day_pass"|"monthly", price, currency: "CAD" }`.
 

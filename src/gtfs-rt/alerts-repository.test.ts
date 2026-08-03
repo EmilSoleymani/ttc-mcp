@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Mode } from "../schemas/stop.js";
 import {
+  type AlertModeIndex,
   alertsMatching,
   deriveCategory,
   matchesFilters,
@@ -18,6 +19,14 @@ const ROUTE_MODE_BY_ID: ReadonlyMap<string, Mode> = new Map([
   ["1", "subway"],
   ["900", "bus"],
 ]);
+const STOP_MODE_BY_ID: ReadonlyMap<string, Mode> = new Map([
+  ["9000", "subway"], // a subway station stop (no route_id on its alert)
+  ["662", "bus"],
+]);
+const INDEX: AlertModeIndex = {
+  routeModeById: ROUTE_MODE_BY_ID,
+  stopModeById: STOP_MODE_BY_ID,
+};
 
 function alertEntity(
   id: string,
@@ -91,9 +100,59 @@ describe("deriveCategory", () => {
     ).toBe("elevator");
   });
 
-  it("falls back to 'detour' for an unmapped/unset effect", () => {
-    expect(deriveCategory(Effect.OTHER_EFFECT, "", undefined)).toBe("detour");
-    expect(deriveCategory(undefined, "", undefined)).toBe("detour");
+  it("derives 'detour' from header text when TTC leaves the effect unknown", () => {
+    // TTC's live feed sets effect = UNKNOWN_EFFECT on every alert, so a real
+    // detour is recognizable only by its wording — it must not fall to 'other'.
+    expect(
+      deriveCategory(
+        Effect.UNKNOWN_EFFECT,
+        "506 Carlton: Detour via Ossington",
+        undefined,
+      ),
+    ).toBe("detour");
+    expect(
+      deriveCategory(
+        Effect.UNKNOWN_EFFECT,
+        "16 Mccowan: Buses are not stopping at Kennedy",
+        undefined,
+      ),
+    ).toBe("detour");
+    // TTC truncates the header ("...not stoppi") and carries the signal word
+    // "Bypass" in the description — the description must be enough on its own.
+    expect(
+      deriveCategory(
+        Effect.UNKNOWN_EFFECT,
+        "16 Mccowan: Buses are not stoppi",
+        "Bypass near Scarborough Centre Station while we respond to an incident.",
+      ),
+    ).toBe("detour");
+  });
+
+  it("derives 'no_service'/'delay' from text under an unknown effect", () => {
+    expect(
+      deriveCategory(
+        Effect.UNKNOWN_EFFECT,
+        "Line 5 Eglinton: No service between stations",
+        undefined,
+      ),
+    ).toBe("no_service");
+    expect(
+      deriveCategory(
+        Effect.UNKNOWN_EFFECT,
+        "Line 1: Delays southbound",
+        undefined,
+      ),
+    ).toBe("delay");
+  });
+
+  it("falls back to the neutral 'other' for an unmapped/unset effect", () => {
+    expect(deriveCategory(Effect.OTHER_EFFECT, "", undefined)).toBe("other");
+    expect(deriveCategory(Effect.UNKNOWN_EFFECT, "", undefined)).toBe("other");
+    expect(deriveCategory(undefined, "", undefined)).toBe("other");
+    // A generic info notice with no reroute must not be labelled 'detour'.
+    expect(
+      deriveCategory(Effect.OTHER_EFFECT, "Have proof of payment ready", ""),
+    ).toBe("other");
   });
 });
 
@@ -114,7 +173,7 @@ describe("toAlert", () => {
       activePeriod: [{ start: 1_780_000_000, end: 1_780_003_600 }],
     });
 
-    const alert = toAlert(entity, ROUTE_MODE_BY_ID);
+    const alert = toAlert(entity, INDEX);
     expect(alert).toMatchObject({
       id: "alert-1",
       header: "Line 1 delays",
@@ -137,7 +196,10 @@ describe("toAlert", () => {
       informedEntity: [{ routeType: 3 }],
     });
 
-    const alert = toAlert(entity, new Map());
+    const alert = toAlert(entity, {
+      routeModeById: new Map(),
+      stopModeById: new Map(),
+    });
     expect(alert.informed.modes).toEqual(["bus"]);
     expect(alert.informed.routes).toBeUndefined();
   });
@@ -150,13 +212,29 @@ describe("toAlert", () => {
       informedEntity: [{ routeId: "1" }],
     });
 
-    const alert = toAlert(entity, ROUTE_MODE_BY_ID);
+    const alert = toAlert(entity, INDEX);
     expect(alert.informed.modes).toEqual(["subway"]);
+  });
+
+  it("resolves subway mode from a bare stop_id via the static stop catalog", () => {
+    // A subway-station alert (elevator/escalator outage) that informs only a
+    // stop_id with no route_id — mode must come from the stop join, not be
+    // dropped, so it still surfaces under `mode: subway`.
+    const entity = alertEntity("alert-2c", {
+      effect: Effect.ACCESSIBILITY_ISSUE,
+      headerText: { translation: [{ text: "Elevator out at station" }] },
+      informedEntity: [{ stopId: "9000" }],
+    });
+
+    const alert = toAlert(entity, INDEX);
+    expect(alert.informed.modes).toEqual(["subway"]);
+    expect(alert.informed.stops).toEqual(["9000"]);
+    expect(alert.informed.routes).toBeUndefined();
   });
 
   it("defaults an untranslated header to an empty string, not undefined", () => {
     const entity = alertEntity("alert-3", {});
-    const alert = toAlert(entity, ROUTE_MODE_BY_ID);
+    const alert = toAlert(entity, INDEX);
     expect(alert.header).toBe("");
   });
 });
@@ -174,39 +252,35 @@ describe("matchesFilters / alertsMatching", () => {
   });
 
   it("filters by mode", () => {
-    const result = alertsMatching([subwayAlert, busAlert], ROUTE_MODE_BY_ID, {
+    const result = alertsMatching([subwayAlert, busAlert], INDEX, {
       mode: "subway",
     });
     expect(result.map((a) => a.id)).toEqual(["subway-alert"]);
   });
 
   it("filters by route_id", () => {
-    const result = alertsMatching([subwayAlert, busAlert], ROUTE_MODE_BY_ID, {
+    const result = alertsMatching([subwayAlert, busAlert], INDEX, {
       routeId: "900",
     });
     expect(result.map((a) => a.id)).toEqual(["bus-alert"]);
   });
 
   it("filters by stop_id", () => {
-    const result = alertsMatching([subwayAlert, busAlert], ROUTE_MODE_BY_ID, {
+    const result = alertsMatching([subwayAlert, busAlert], INDEX, {
       stopId: "662",
     });
     expect(result.map((a) => a.id)).toEqual(["bus-alert"]);
   });
 
   it("filters by derived category", () => {
-    const result = alertsMatching([subwayAlert, busAlert], ROUTE_MODE_BY_ID, {
+    const result = alertsMatching([subwayAlert, busAlert], INDEX, {
       category: "elevator",
     });
     expect(result.map((a) => a.id)).toEqual(["bus-alert"]);
   });
 
   it("returns every alert when no filter is given", () => {
-    const result = alertsMatching(
-      [subwayAlert, busAlert],
-      ROUTE_MODE_BY_ID,
-      {},
-    );
+    const result = alertsMatching([subwayAlert, busAlert], INDEX, {});
     expect(result.map((a) => a.id).sort()).toEqual([
       "bus-alert",
       "subway-alert",
@@ -214,7 +288,7 @@ describe("matchesFilters / alertsMatching", () => {
   });
 
   it("matchesFilters AND-combines multiple filters", () => {
-    const alert = toAlert(subwayAlert, ROUTE_MODE_BY_ID);
+    const alert = toAlert(subwayAlert, INDEX);
     expect(
       matchesFilters(alert, { mode: "subway", category: "no_service" }),
     ).toBe(true);

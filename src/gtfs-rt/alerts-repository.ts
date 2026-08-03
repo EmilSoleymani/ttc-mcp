@@ -98,16 +98,31 @@ function safeModeForRouteType(routeType: number): Mode | undefined {
 }
 
 /**
+ * The static-catalog maps `get_alerts` joins each RT alert against
+ * (docs/spec/realtime-integration.md #4 "Static <-> RT join"): a GTFS-RT
+ * `EntitySelector` usually carries only a `route_id` (occasionally a bare
+ * `stop_id`) with no `route_type`, so `mode` is resolved from the ingested
+ * static catalog rather than the RT feed itself.
+ */
+export interface AlertModeIndex {
+  /** `route_id -> mode` (routes-repository `routeModeIndex`). */
+  routeModeById: ReadonlyMap<string, Mode>;
+  /** `stop_id -> mode` (stops-repository `stopModeIndex`). */
+  stopModeById: ReadonlyMap<string, Mode>;
+}
+
+/**
  * `informed.routes/stops/modes` from the alert's `informed_entity` list
- * (docs/spec/realtime-integration.md #3 "Alerts -> get_alerts"). Most TTC
- * selectors carry a `route_id` with no `route_type`, so `mode` is resolved
- * from the ingested static catalog (`routeModeById`, `route_id -> mode`)
- * when the selector itself doesn't say — the RT/static join described in
- * #4 "Static <-> RT join".
+ * (docs/spec/realtime-integration.md #3 "Alerts -> get_alerts"). `mode` is
+ * resolved from whichever signal the selector carries: an explicit
+ * `route_type`, else a `route_id` (via `routeModeById`), and independently a
+ * `stop_id` (via `stopModeById`) — the latter is how a subway-station alert
+ * that informs only a `stop_id`, with no subway `route_id`, still surfaces
+ * under `mode: subway`.
  */
 function resolveInformed(
   selectors: transit_realtime.IEntitySelector[] | null | undefined,
-  routeModeById: ReadonlyMap<string, Mode>,
+  modeIndex: AlertModeIndex,
 ): Alert["informed"] {
   const routes = new Set<string>();
   const stops = new Set<string>();
@@ -127,7 +142,11 @@ function resolveInformed(
       const mode = safeModeForRouteType(selector.routeType as number);
       if (mode) modes.add(mode);
     } else if (selector.routeId) {
-      const mode = routeModeById.get(selector.routeId);
+      const mode = modeIndex.routeModeById.get(selector.routeId);
+      if (mode) modes.add(mode);
+    }
+    if (selector.stopId) {
+      const mode = modeIndex.stopModeById.get(selector.stopId);
       if (mode) modes.add(mode);
     }
   }
@@ -141,14 +160,18 @@ function resolveInformed(
 
 /**
  * `category` derivation from effect + header/description text
- * (docs/spec/realtime-integration.md #3, tool-schemas #8): text is checked
- * first because `ACCESSIBILITY_ISSUE` alone can't tell an elevator outage
- * from an escalator one, and because "planned" wording (advance notice of
- * scheduled work) isn't itself an `Effect` value; `effect` is the fallback
- * for everything else, with `ACCESSIBILITY_ISSUE` defaulting to `elevator`
- * (TTC's overwhelming majority of accessibility alerts) and any effect this
- * taxonomy has no dedicated bucket for (`OTHER_EFFECT`/`UNKNOWN_EFFECT`/unset)
- * falling back to the generic `detour`.
+ * (docs/spec/realtime-integration.md #3, tool-schemas #8).
+ *
+ * Text is the *primary* signal: TTC's real alerts feed sets `effect =
+ * UNKNOWN_EFFECT` on every alert (verified against the live feed), so the
+ * `Effect` switch below is only a fallback for a feed that does populate it —
+ * for TTC the text checks carry the classification. Wording is matched most-
+ * specific first (`elevator`/`escalator` before the generic buckets, `planned`
+ * advance-notice wording before the disruption it schedules). An alert with no
+ * recognizable wording *and* no usable effect falls to the neutral `other`
+ * rather than being asserted to be a concrete `detour` — a fare or safety
+ * notice ("have proof of payment ready", "please look both ways") is not a
+ * reroute.
  */
 export function deriveCategory(
   effect: transit_realtime.Alert.Effect | null | undefined,
@@ -159,6 +182,19 @@ export function deriveCategory(
   if (text.includes("elevator")) return "elevator";
   if (text.includes("escalator")) return "escalator";
   if (text.includes("planned")) return "planned";
+  if (text.includes("no service")) return "no_service";
+  // "detour"/"bypass"/"not stopping at ..." are TTC's wording for a reroute or
+  // stop closure/relocation — all localized route deviations, so they share the
+  // `detour` bucket. ("bypass" is what the description carries when the header
+  // is truncated to "...Buses are not stoppi".)
+  if (
+    text.includes("detour") ||
+    text.includes("bypass") ||
+    text.includes("not stopping")
+  ) {
+    return "detour";
+  }
+  if (text.includes("delay")) return "delay";
 
   const { Effect } = GtfsRt.Alert;
   switch (effect) {
@@ -177,15 +213,12 @@ export function deriveCategory(
     case Effect.NO_EFFECT:
       return "planned";
     default:
-      return "detour";
+      return "other";
   }
 }
 
 /** Decoded Alert (+ its FeedEntity id) -> the finalized `Alert` DTO. */
-export function toAlert(
-  entity: AlertEntity,
-  routeModeById: ReadonlyMap<string, Mode>,
-): Alert {
+export function toAlert(entity: AlertEntity, modeIndex: AlertModeIndex): Alert {
   const { alert } = entity;
   const header = translatedText(alert.headerText) ?? "";
   const description = translatedText(alert.descriptionText);
@@ -194,7 +227,7 @@ export function toAlert(
   const cause = causeName(alert.cause);
   const effect = effectName(alert.effect);
   const category = deriveCategory(alert.effect, header, description);
-  const informed = resolveInformed(alert.informedEntity, routeModeById);
+  const informed = resolveInformed(alert.informedEntity, modeIndex);
   const active_period = activePeriods(alert.activePeriod);
 
   return {
@@ -243,10 +276,10 @@ export function matchesFilters(alert: Alert, filters: AlertFilters): boolean {
 /** Decoded alerts -> finalized `Alert` DTOs matching the given filters. */
 export function alertsMatching(
   entities: AlertEntity[],
-  routeModeById: ReadonlyMap<string, Mode>,
+  modeIndex: AlertModeIndex,
   filters: AlertFilters,
 ): Alert[] {
   return entities
-    .map((entity) => toAlert(entity, routeModeById))
+    .map((entity) => toAlert(entity, modeIndex))
     .filter((alert) => matchesFilters(alert, filters));
 }

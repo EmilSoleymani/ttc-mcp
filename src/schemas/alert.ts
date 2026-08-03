@@ -46,7 +46,10 @@ export const alertSeveritySchema = z.enum([
 export type AlertSeverity = z.infer<typeof alertSeveritySchema>;
 
 // Derived (not a raw GTFS-RT field) from effect + header/description text
-// (docs/spec/realtime-integration.md #3 "Alerts -> get_alerts").
+// (docs/spec/realtime-integration.md #3 "Alerts -> get_alerts"). `other` is a
+// neutral catch-all for alerts whose effect+text give no confident signal
+// (e.g. a generic OTHER_EFFECT/UNKNOWN_EFFECT/unset fare or info notice) —
+// so those aren't mislabelled as a concrete `detour`.
 export const alertCategorySchema = z.enum([
   "elevator",
   "escalator",
@@ -54,6 +57,7 @@ export const alertCategorySchema = z.enum([
   "delay",
   "no_service",
   "planned",
+  "other",
 ]);
 export type AlertCategory = z.infer<typeof alertCategorySchema>;
 

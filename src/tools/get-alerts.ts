@@ -3,6 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { alertsMatching } from "../gtfs-rt/alerts-repository.js";
 import { routeModeIndex } from "../gtfs/routes-repository.js";
+import { stopModeIndex } from "../gtfs/stops-repository.js";
 import { toolError } from "../errors.js";
 import { getAlertsInputShape, getAlertsOutputShape } from "../schemas/alert.js";
 import type { ServerDeps } from "../server.js";
@@ -45,13 +46,20 @@ export function registerGetAlerts(server: McpServer, deps: ServerDeps): void {
         };
       }
 
-      const routeModeById = await routeModeIndex(deps.db);
-      const alerts = alertsMatching(entities, routeModeById, {
-        ...(mode !== undefined ? { mode } : {}),
-        ...(route_id !== undefined ? { routeId: route_id } : {}),
-        ...(stop_id !== undefined ? { stopId: stop_id } : {}),
-        ...(category !== undefined ? { category } : {}),
-      });
+      const [routeModeById, stopModeById] = await Promise.all([
+        routeModeIndex(deps.db),
+        stopModeIndex(deps.db),
+      ]);
+      const alerts = alertsMatching(
+        entities,
+        { routeModeById, stopModeById },
+        {
+          ...(mode !== undefined ? { mode } : {}),
+          ...(route_id !== undefined ? { routeId: route_id } : {}),
+          ...(stop_id !== undefined ? { stopId: stop_id } : {}),
+          ...(category !== undefined ? { category } : {}),
+        },
+      );
 
       const cap = Math.min(limit ?? MAX_ALERTS, MAX_ALERTS);
       const truncated = alerts.length > cap;

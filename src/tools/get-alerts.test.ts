@@ -62,6 +62,49 @@ describe("get_alerts", () => {
     });
   });
 
+  it("surfaces a subway-station alert that informs only a stop_id (no route_id)", async () => {
+    // buildFixtureDb seeds Union station (stop 9000) whose platform 9001 is on
+    // Line 1 — the stop-mode join must resolve this to subway even though the
+    // alert carries no route_id, mirroring TTC's real station elevator alerts.
+    const deps: ServerDeps = {
+      db,
+      rt: fixtureAlertsRtClient([
+        {
+          id: "union-elevator",
+          effect: Effect.ACCESSIBILITY_ISSUE,
+          headerText: "Union Station: Elevator out of service",
+          informedEntity: [{ stopId: "9000" }],
+        },
+      ]),
+    };
+    const result = await callTool("get_alerts", { mode: "subway" }, deps);
+    expect(result.isError).toBe(false);
+    const dto = result.structuredContent as { alerts: Alert[] };
+    expect(dto.alerts).toHaveLength(1);
+    expect(dto.alerts[0]).toMatchObject({
+      id: "union-elevator",
+      category: "elevator",
+      informed: { stops: ["9000"], modes: ["subway"] },
+    });
+  });
+
+  it("labels an alert with no confident effect/text signal as 'other'", async () => {
+    const deps: ServerDeps = {
+      db,
+      rt: fixtureAlertsRtClient([
+        {
+          id: "fare-notice",
+          effect: Effect.OTHER_EFFECT,
+          headerText: "Have proof of payment ready for fare inspection",
+          informedEntity: [{ routeId: "900" }],
+        },
+      ]),
+    };
+    const result = await callTool("get_alerts", { category: "other" }, deps);
+    const dto = result.structuredContent as { alerts: Alert[] };
+    expect(dto.alerts.map((a) => a.id)).toEqual(["fare-notice"]);
+  });
+
   it("filters by route_id", async () => {
     const deps: ServerDeps = { db, rt: fixtureAlertsRtClient(fixtureAlerts) };
     const result = await callTool("get_alerts", { route_id: "900" }, deps);

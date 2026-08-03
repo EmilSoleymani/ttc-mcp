@@ -429,26 +429,30 @@ export async function getStopById(
   };
 }
 
-/** Full stop catalog for the ttc://stops resource — unfiltered, uncapped. */
-export async function listStops(client: Client): Promise<StopSummary[]> {
-  const stopsResult = await client.execute(`SELECT ${STOP_COLUMNS} FROM stops`);
-  const rows = rowsFrom(stopsResult);
-
-  const routeTypesResult = await client.execute(
+/** `stop_id -> {route_type}` served directly (one DISTINCT scan of the whole
+ * feed), the catalog-wide half of the stop-mode resolution below. */
+async function fetchRouteTypesByStopId(
+  client: Client,
+): Promise<Map<number, Set<number>>> {
+  const result = await client.execute(
     `SELECT DISTINCT st.stop_id AS stop_id, r.route_type AS route_type
      FROM stop_times st
      JOIN trips t ON t.trip_id = st.trip_id
      JOIN routes r ON r.route_id = t.route_id`,
   );
   const routeTypesByStop = new Map<number, Set<number>>();
-  for (const row of routeTypesResult.rows) {
+  for (const row of result.rows) {
     const stopId = Number(row.stop_id);
     const routeType = Number(row.route_type);
     const set = routeTypesByStop.get(stopId);
     if (set) set.add(routeType);
     else routeTypesByStop.set(stopId, new Set([routeType]));
   }
+  return routeTypesByStop;
+}
 
+/** parent_station -> its child platform stop_ids, over the whole catalog. */
+function childStopIdsByParent(rows: StopRow[]): Map<number, number[]> {
   const childrenByParent = new Map<number, number[]>();
   for (const row of rows) {
     if (row.parent_station === null) continue;
@@ -456,14 +460,67 @@ export async function listStops(client: Client): Promise<StopSummary[]> {
     if (list) list.push(row.stop_id);
     else childrenByParent.set(row.parent_station, [row.stop_id]);
   }
+  return childrenByParent;
+}
+
+/** The resolved (priority-tie-broken) mode of a stop, unioning its own routes
+ * with its child platforms' — a station carries no stop_times of its own. */
+function resolveStopMode(
+  stopId: number,
+  routeTypesByStop: Map<number, Set<number>>,
+  childrenByParent: Map<number, number[]>,
+): Mode | undefined {
+  const routeTypes = new Set<number>(routeTypesByStop.get(stopId) ?? []);
+  for (const childId of childrenByParent.get(stopId) ?? []) {
+    for (const rt of routeTypesByStop.get(childId) ?? []) routeTypes.add(rt);
+  }
+  return pickMode(routeTypes);
+}
+
+/**
+ * `stop_id -> mode` for the full catalog — the static-catalog stop half of the
+ * RT alert join (docs/spec/realtime-integration.md #4): a GTFS-RT alert can
+ * inform a `stop_id` (e.g. a subway station) with no `route_id`, so `get_alerts`
+ * resolves that stop's mode from here. Keyed by the canonical (numeric-string)
+ * stop_id so an RT `stop_id` string looks up directly. Stops served by no route
+ * (e.g. subway entrances) are omitted.
+ */
+export async function stopModeIndex(
+  client: Client,
+): Promise<Map<string, Mode>> {
+  const rows = rowsFrom(
+    await client.execute(`SELECT ${STOP_COLUMNS} FROM stops`),
+  );
+  const routeTypesByStop = await fetchRouteTypesByStopId(client);
+  const childrenByParent = childStopIdsByParent(rows);
+
+  const index = new Map<string, Mode>();
+  for (const row of rows) {
+    const mode = resolveStopMode(
+      row.stop_id,
+      routeTypesByStop,
+      childrenByParent,
+    );
+    if (mode !== undefined) index.set(String(row.stop_id), mode);
+  }
+  return index;
+}
+
+/** Full stop catalog for the ttc://stops resource — unfiltered, uncapped. */
+export async function listStops(client: Client): Promise<StopSummary[]> {
+  const stopsResult = await client.execute(`SELECT ${STOP_COLUMNS} FROM stops`);
+  const rows = rowsFrom(stopsResult);
+
+  const routeTypesByStop = await fetchRouteTypesByStopId(client);
+  const childrenByParent = childStopIdsByParent(rows);
 
   const stops: StopSummary[] = [];
   for (const row of rows) {
-    const routeTypes = new Set<number>(routeTypesByStop.get(row.stop_id) ?? []);
-    for (const childId of childrenByParent.get(row.stop_id) ?? []) {
-      for (const rt of routeTypesByStop.get(childId) ?? []) routeTypes.add(rt);
-    }
-    const mode = pickMode(routeTypes);
+    const mode = resolveStopMode(
+      row.stop_id,
+      routeTypesByStop,
+      childrenByParent,
+    );
     // Non-transit rows (e.g. subway entrances with no trips) aren't stops the
     // API can usefully return.
     if (mode === undefined) continue;
