@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { RtClient } from "./rt-client.js";
-import { encodeVehiclePositionsFeed } from "./test-support.js";
+import {
+  encodeVehiclePositionsFeed,
+  fixtureTripUpdatesRtClient,
+} from "./test-support.js";
 
 function fakeFetch(onCall: () => void): typeof fetch {
   const body = encodeVehiclePositionsFeed([
@@ -65,6 +68,23 @@ describe("RtClient coalescing cache", () => {
     await client.getVehiclePositions();
 
     expect(calls).toBe(2);
+  });
+
+  it("decodes TripUpdates from the `trips` feed", async () => {
+    const client = fixtureTripUpdatesRtClient([
+      {
+        tripId: "47483136",
+        routeId: "504",
+        stopTimeUpdates: [{ stopId: "1234", arrivalSeconds: 1_800_000_000 }],
+      },
+      { tripId: "47483137", routeId: "512" },
+    ]);
+    const updates = await client.getTripUpdates();
+    expect(updates).toHaveLength(2);
+    expect(updates[0]?.trip?.tripId).toBe("47483136");
+    // arrival.time is an int64 (Long) on the wire — compare via Number().
+    const arrivalTime = updates[0]?.stopTimeUpdate?.[0]?.arrival?.time;
+    expect(Number(arrivalTime)).toBe(1_800_000_000);
   });
 
   it("does not cache a failed decode", async () => {

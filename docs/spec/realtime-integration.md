@@ -48,6 +48,8 @@ RT entities carry `trip_id`/`stop_id`/`route_id`; human-readable names + `direct
 
 **⚠ Risk — `trip_id` match:** GTFS-RT `trip_id` is *assumed* to match the static feed's `trip_id`, but this is not guaranteed across TTC's Clever Devices backend and the City's static export. **Required first-implementation validation:** sample the live TripUpdates feed and confirm `trip_id` overlap with static `trips`. **Fallback if unmatched:** surface `route_id` + RT-provided headsign directly from the RT entity (predictions still usable), and set `source:"predicted"` without the static enrichment. Never drop an arrival solely because its `trip_id` didn't join.
 
+> **Resolved (#9) — see [`docs/research/rt-trip-id-join.md`](../research/rt-trip-id-join.md).** The match key is **`toInt(trip_id)` applied identically on both sides**: the static `trips.trip_id` is an `INTEGER PRIMARY KEY` ingested via `toInt`, so the RT side must parse the wire string the same way (`parseRtTripId`). The join + never-drop fallback live in `src/gtfs/trips-repository.ts` (`getStaticTripById`) and `src/gtfs-rt/trip-join.ts` (`resolveArrivalIdentity`), both tested. The live overlap number is reproduced with `npm run validate-rt-join` (needs network egress to `bustime.ttc.ca`, which the CI sandbox blocks).
+
 ## Config surface (adds to ticket 006's table)
 
 | Var | Purpose | Default |

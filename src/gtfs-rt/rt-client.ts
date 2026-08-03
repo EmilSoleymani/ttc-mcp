@@ -99,6 +99,15 @@ export class RtClient {
       .map((entity) => entity.vehicle)
       .filter((v): v is transit_realtime.IVehiclePosition => v != null);
   }
+
+  /** Decoded TripUpdates from the `trips` feed (the arrival-prediction feed
+   * `get_arrivals` consumes). Mirrors `getVehiclePositions`. */
+  async getTripUpdates(): Promise<transit_realtime.ITripUpdate[]> {
+    const feed = await this.getFeed("trips");
+    return feed.entity
+      .map((entity) => entity.tripUpdate)
+      .filter((t): t is transit_realtime.ITripUpdate => t != null);
+  }
 }
 
 /**
