@@ -8,7 +8,12 @@ name: Smoke
 on:
   schedule:
     - cron: "0 12 * * 1" # weekly, Monday 12:00 UTC
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      rt_base_url:
+        description: "GTFS-RT base URL override. Leave blank for the real feed; set to an unreachable URL to test the failure + issue-filing path."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -29,6 +34,8 @@ jobs:
 
       - name: Run smoke checks
         run: npm run smoke
+        env:
+          SMOKE_RT_BASE_URL: ${{ inputs.rt_base_url }}
 
       - name: File an issue on failure
         if: failure()

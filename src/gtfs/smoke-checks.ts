@@ -112,12 +112,17 @@ export async function checkRealtimeFeedDomain(
   }
 }
 
-/** Runs every upstream-domain smoke check, one call each. */
+/** Runs every upstream-domain smoke check, one call each. The GTFS-RT base URL
+ * can be overridden via the SMOKE_RT_BASE_URL env var (the smoke workflow
+ * exposes it as a workflow_dispatch input) — point it at an unreachable URL to
+ * exercise the failure/issue-filing path without breaking the real check. */
 export async function runSmokeChecks(
   fetchImpl: typeof fetch = fetch,
+  rtBaseUrl: string = process.env.SMOKE_RT_BASE_URL ||
+    DEFAULT_SMOKE_RT_BASE_URL,
 ): Promise<SmokeCheckResult[]> {
   return Promise.all([
     checkStaticFeedDomain(fetchImpl),
-    checkRealtimeFeedDomain(fetchImpl),
+    checkRealtimeFeedDomain(fetchImpl, rtBaseUrl),
   ]);
 }
