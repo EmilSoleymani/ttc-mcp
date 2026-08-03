@@ -4,11 +4,12 @@
 # gtfs-apply.yml, which performs the ingest. HITL: production data changes only
 # after you approve (docs/spec/gtfs-ingestion.md "Refresh model").
 #
-# Uses a fine-grained PAT (secrets.GTFS_REFRESH_PAT — repo scope: Contents RW +
-# Pull requests RW) instead of the default GITHUB_TOKEN, so the PR it opens
-# actually triggers the required "checks (20)"/"checks (22)" CI and is
-# mergeable. PRs opened by GITHUB_TOKEN don't trigger workflows, so with the
-# default token the required checks would never run and the PR couldn't merge.
+# Authenticates as a GitHub App (secrets.GTFS_REFRESH_APP_ID +
+# GTFS_REFRESH_APP_KEY — App perms: Contents RW + Pull requests RW), minting a
+# short-lived installation token at runtime. This matters because the PR it
+# opens must trigger the required "checks (20)"/"checks (22)" CI to be
+# mergeable, and PRs opened by the default GITHUB_TOKEN don't trigger workflows
+# — so those checks would never run and the PR could never be merged.
 name: GTFS Refresh
 
 on:
@@ -24,9 +25,15 @@ jobs:
   propose:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.GTFS_REFRESH_APP_ID }}
+          private-key: ${{ secrets.GTFS_REFRESH_APP_KEY }}
+
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GTFS_REFRESH_PAT || github.token }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -42,7 +49,7 @@ jobs:
       - name: Open refresh PR
         if: steps.freshness.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GTFS_REFRESH_PAT || github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           # Don't stack duplicates: skip if a refresh PR is already open.
