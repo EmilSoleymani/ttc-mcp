@@ -2,9 +2,12 @@
 # (`ghcr.io/emilsoleymani/ttc-mcp`) (stack-baseline: inherits go-planner's
 # docker-deployment "ghcr+npm tag-triggered publish" spec).
 #
-# npm publish needs an NPM_TOKEN repo secret (an npm automation token with
-# publish rights) — not one of the Turso/Vercel secrets from #1, provision
-# separately. ghcr publish uses the built-in GITHUB_TOKEN.
+# npm publish uses OIDC trusted publishing (no NPM_TOKEN secret): the package's
+# trusted-publisher config on npmjs.com authorizes this repo + workflow, and the
+# `id-token: write` permission below lets npm mint a short-lived credential.
+# Requires npm >= 11.5.1 (Node 22 ships npm 10.x, so we upgrade npm first) and a
+# one-time manual `npm publish --access public` to create the package before the
+# trusted publisher can be configured. ghcr publish uses the built-in GITHUB_TOKEN.
 name: Publish
 
 on:
@@ -25,14 +28,14 @@ jobs:
           node-version: 22
           cache: npm
           registry-url: "https://registry.npmjs.org"
+      # OIDC trusted publishing needs npm >= 11.5.1; Node 22 bundles npm 10.x.
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   ghcr:
     runs-on: ubuntu-latest
