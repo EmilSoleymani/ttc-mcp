@@ -1,0 +1,36 @@
+# GTFS Apply: runs when a GTFS-refresh PR merges (a push to main that touches
+# the recorded state file). Ingests the newly-approved GTFS data into the
+# production Turso DB. Paired with gtfs-refresh.yml, which opens the PR — this
+# is the "apply after human approval" half of the HITL refresh flow.
+#
+# Needs the Turso secrets: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN.
+name: GTFS Apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/gtfs-refresh-state.json"
+  workflow_dispatch: {} # manual re-apply if a run needs to be repeated
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Ingest to Turso
+        run: npm run ingest
+        env:
+          LIBSQL_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          LIBSQL_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
