@@ -1,6 +1,7 @@
 import { type Client } from "@libsql/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { RtClient } from "../gtfs-rt/rt-client.js";
 import {
   fixtureTripUpdatesRtClient,
   unusedRtClient,
@@ -55,16 +56,31 @@ describe("get_arrivals", () => {
   });
 
   it("falls back to scheduled for a subway stop (no RT fetch)", async () => {
-    const deps: ServerDeps = { db, rt: unusedRtClient() };
+    // Prove the subway gate actually skips the RT call, rather than
+    // attempting it and swallowing a failure in the try/catch — a plain
+    // unusedRtClient() (fetch rejects) can't tell those two cases apart.
+    let fetchCalls = 0;
+    const rt = new RtClient({
+      cacheEnabled: false,
+      fetchImpl: () => {
+        fetchCalls++;
+        return Promise.reject(
+          new Error("Unexpected GTFS-RT fetch in this test."),
+        );
+      },
+    });
+    const deps: ServerDeps = { db, rt };
     const result = await callTool("get_arrivals", { stop_id: "9000" }, deps);
     expect(result.isError).toBe(false);
     const dto = result.structuredContent as Dto;
     expect(dto.realtime_available).toBe(false);
+    expect(dto.arrivals.length).toBeGreaterThan(0);
     expect(
       dto.arrivals.every(
         (a) => a.source === "scheduled" && a.realtime === false,
       ),
     ).toBe(true);
+    expect(fetchCalls).toBe(0);
   });
 
   it("falls back to scheduled when there is no live data in the window", async () => {
@@ -72,6 +88,7 @@ describe("get_arrivals", () => {
     const result = await callTool("get_arrivals", { stop_id: "662" }, deps);
     const dto = result.structuredContent as Dto;
     expect(dto.realtime_available).toBe(false);
+    expect(dto.arrivals.length).toBeGreaterThan(0);
     expect(dto.arrivals.every((a) => a.source === "scheduled")).toBe(true);
   });
 
@@ -80,6 +97,7 @@ describe("get_arrivals", () => {
     const result = await callTool("get_arrivals", { stop_id: "662" }, deps);
     const dto = result.structuredContent as Dto;
     expect(dto.realtime_available).toBe(false);
+    expect(dto.arrivals.length).toBeGreaterThan(0);
     expect(dto.arrivals.every((a) => a.source === "scheduled")).toBe(true);
   });
 
