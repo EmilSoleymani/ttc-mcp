@@ -1,0 +1,13 @@
+# Run-only compose for self-hosters: pulls the published image, no build
+# step (stack-baseline: inherits go-planner's docker-deployment spec).
+# Override with docker-compose.override.yml (gitignored) for local customization,
+# e.g. to point LIBSQL_URL at a remote Turso database instead of the image's
+# baked-in local file.
+services:
+  ttc-mcp:
+    image: ghcr.io/emilsoleymani/ttc-mcp:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"

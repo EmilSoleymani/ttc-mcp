@@ -1,0 +1,73 @@
+# GTFS Refresh (propose): weekly cron + CKAN last_modified poll. On an actual
+# upstream change it opens a PR bumping .github/gtfs-refresh-state.json for
+# human review — it does NOT touch Turso. Merging that PR triggers
+# gtfs-apply.yml, which performs the ingest. HITL: production data changes only
+# after you approve (docs/spec/gtfs-ingestion.md "Refresh model").
+#
+# Authenticates as a GitHub App (secrets.GTFS_REFRESH_APP_ID +
+# GTFS_REFRESH_APP_KEY — App perms: Contents RW + Pull requests RW), minting a
+# short-lived installation token at runtime. This matters because the PR it
+# opens must trigger the required "checks (20)"/"checks (22)" CI to be
+# mergeable, and PRs opened by the default GITHUB_TOKEN don't trigger workflows
+# — so those checks would never run and the PR could never be merged.
+name: GTFS Refresh
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.GTFS_REFRESH_APP_ID }}
+          private-key: ${{ secrets.GTFS_REFRESH_APP_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check GTFS freshness
+        id: freshness
+        run: npm run check-gtfs-freshness
+
+      - name: Open refresh PR
+        if: steps.freshness.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          # Don't stack duplicates: skip if a refresh PR is already open.
+          open=$(gh pr list --state open --json headRefName \
+            --jq '[.[] | select(.headRefName | startswith("gtfs-refresh/"))] | length')
+          if [ "$open" != "0" ]; then
+            echo "A refresh PR is already open — not opening another."
+            exit 0
+          fi
+          branch="gtfs-refresh/$(date -u +%Y%m%d-%H%M%S)"
+          mkdir -p .github
+          printf '%s\n' '${{ steps.freshness.outputs.state }}' > .github/gtfs-refresh-state.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add .github/gtfs-refresh-state.json
+          git commit -m "chore: refresh GTFS data to latest upstream"
+          git push -u origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "GTFS refresh: upstream data changed" \
+            --body "TTC republished the GTFS feed since the last refresh. Merging this PR updates the recorded refresh state and triggers gtfs-apply.yml, which ingests the new data into the production Turso DB. Nothing has been written to Turso yet — review and squash-merge to apply."
