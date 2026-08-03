@@ -32,41 +32,63 @@ function alertEntity(
 describe("deriveCategory", () => {
   it("prefers 'elevator' from header text over the raw effect", () => {
     expect(
-      deriveCategory(Effect.ACCESSIBILITY_ISSUE, "Elevator out of service", undefined),
+      deriveCategory(
+        Effect.ACCESSIBILITY_ISSUE,
+        "Elevator out of service",
+        undefined,
+      ),
     ).toBe("elevator");
   });
 
   it("prefers 'escalator' from description text over the raw effect", () => {
     expect(
-      deriveCategory(Effect.ACCESSIBILITY_ISSUE, "Service alert", "Escalator closed for repair"),
+      deriveCategory(
+        Effect.ACCESSIBILITY_ISSUE,
+        "Service alert",
+        "Escalator closed for repair",
+      ),
     ).toBe("escalator");
   });
 
   it("prefers 'planned' wording in the text over the raw effect", () => {
-    expect(deriveCategory(Effect.DETOUR, "Planned diversion for road work", undefined)).toBe(
-      "planned",
-    );
+    expect(
+      deriveCategory(
+        Effect.DETOUR,
+        "Planned diversion for road work",
+        undefined,
+      ),
+    ).toBe("planned");
   });
 
   it("maps NO_SERVICE to 'no_service'", () => {
-    expect(deriveCategory(Effect.NO_SERVICE, "Line closed", undefined)).toBe("no_service");
+    expect(deriveCategory(Effect.NO_SERVICE, "Line closed", undefined)).toBe(
+      "no_service",
+    );
   });
 
   it("maps DETOUR/MODIFIED_SERVICE/STOP_MOVED to 'detour'", () => {
     expect(deriveCategory(Effect.DETOUR, "", undefined)).toBe("detour");
-    expect(deriveCategory(Effect.MODIFIED_SERVICE, "", undefined)).toBe("detour");
+    expect(deriveCategory(Effect.MODIFIED_SERVICE, "", undefined)).toBe(
+      "detour",
+    );
     expect(deriveCategory(Effect.STOP_MOVED, "", undefined)).toBe("detour");
   });
 
   it("maps SIGNIFICANT_DELAYS/REDUCED_SERVICE to 'delay'", () => {
-    expect(deriveCategory(Effect.SIGNIFICANT_DELAYS, "", undefined)).toBe("delay");
+    expect(deriveCategory(Effect.SIGNIFICANT_DELAYS, "", undefined)).toBe(
+      "delay",
+    );
     expect(deriveCategory(Effect.REDUCED_SERVICE, "", undefined)).toBe("delay");
   });
 
   it("defaults ACCESSIBILITY_ISSUE without device wording to 'elevator'", () => {
-    expect(deriveCategory(Effect.ACCESSIBILITY_ISSUE, "Accessibility alert", undefined)).toBe(
-      "elevator",
-    );
+    expect(
+      deriveCategory(
+        Effect.ACCESSIBILITY_ISSUE,
+        "Accessibility alert",
+        undefined,
+      ),
+    ).toBe("elevator");
   });
 
   it("falls back to 'detour' for an unmapped/unset effect", () => {
@@ -85,7 +107,9 @@ describe("toAlert", () => {
       descriptionText: {
         translation: [{ text: "Signal problem near Bloor", language: "en" }],
       },
-      url: { translation: [{ text: "https://ttc.ca/alerts/1", language: "en" }] },
+      url: {
+        translation: [{ text: "https://ttc.ca/alerts/1", language: "en" }],
+      },
       informedEntity: [{ routeId: "1" }],
       activePeriod: [{ start: 1_780_000_000, end: 1_780_003_600 }],
     });
@@ -178,14 +202,25 @@ describe("matchesFilters / alertsMatching", () => {
   });
 
   it("returns every alert when no filter is given", () => {
-    const result = alertsMatching([subwayAlert, busAlert], ROUTE_MODE_BY_ID, {});
-    expect(result.map((a) => a.id).sort()).toEqual(["bus-alert", "subway-alert"]);
+    const result = alertsMatching(
+      [subwayAlert, busAlert],
+      ROUTE_MODE_BY_ID,
+      {},
+    );
+    expect(result.map((a) => a.id).sort()).toEqual([
+      "bus-alert",
+      "subway-alert",
+    ]);
   });
 
   it("matchesFilters AND-combines multiple filters", () => {
     const alert = toAlert(subwayAlert, ROUTE_MODE_BY_ID);
-    expect(matchesFilters(alert, { mode: "subway", category: "no_service" })).toBe(true);
-    expect(matchesFilters(alert, { mode: "subway", category: "delay" })).toBe(false);
+    expect(
+      matchesFilters(alert, { mode: "subway", category: "no_service" }),
+    ).toBe(true);
+    expect(matchesFilters(alert, { mode: "subway", category: "delay" })).toBe(
+      false,
+    );
     expect(matchesFilters(alert, { mode: "bus" })).toBe(false);
   });
 });
