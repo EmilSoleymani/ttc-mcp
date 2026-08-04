@@ -4,6 +4,7 @@ import type { Client } from "@libsql/client";
 // surrogate keys, integer seconds-since-midnight times, essential columns
 // only. transfers/pathways/levels are added by later slices (#5, #10).
 export const SCHEMA_STATEMENTS: readonly string[] = [
+  "DROP TABLE IF EXISTS rt_stop_crosswalk",
   "DROP TABLE IF EXISTS transfers",
   "DROP TABLE IF EXISTS pathways",
   "DROP TABLE IF EXISTS levels",
@@ -86,6 +87,14 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
      type TEXT NOT NULL
    )`,
   "CREATE INDEX ix_transfers_from ON transfers(from_stop_id)",
+  // RT->static stop crosswalk (#11): GTFS-RT stopTimeUpdate.stopId is the
+  // Dataset B stop_id namespace; B.stop_code == the ingested (Dataset A)
+  // stop_id. Built at ingest from Dataset B — no runtime dependency.
+  `CREATE TABLE rt_stop_crosswalk (
+     rt_stop_id INTEGER PRIMARY KEY,
+     stop_id INTEGER NOT NULL
+   )`,
+  "CREATE INDEX ix_rt_stop_crosswalk_stop ON rt_stop_crosswalk(stop_id)",
 ];
 
 /** Drops and recreates the schedule schema (full-rebuild ingest). */

@@ -130,7 +130,7 @@ function toScheduledDeparture(
   };
 }
 
-function toStopSummaryOnly(detail: StopDetail): StopSummary {
+export function toStopSummary(detail: StopDetail): StopSummary {
   return {
     stop_id: detail.stop_id,
     ...(detail.stop_code !== undefined ? { stop_code: detail.stop_code } : {}),
@@ -192,7 +192,7 @@ export async function getSchedule(
     ? (stopDetail.platforms ?? []).map((p) => Number(p.stop_id))
     : [params.stopId];
 
-  const stop = toStopSummaryOnly(stopDetail);
+  const stop = toStopSummary(stopDetail);
   if (platformIds.length === 0) {
     return { stop, departures: [], truncated: false };
   }

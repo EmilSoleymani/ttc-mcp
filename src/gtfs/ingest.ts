@@ -222,6 +222,16 @@ export async function enrichStationsFromDatasetB(
       WHERE location_type = 1 AND stop_id NOT IN (SELECT stop_id FROM stops)`,
   );
 
+  // Build the RT stop crosswalk while stops_b is still live: RT feeds key
+  // stops by Dataset B stop_id, and B.stop_code is the ingested stop_id.
+  // Join through `stops` so every row points at a real ingested stop; OR
+  // IGNORE guards the (real-data-absent) case of a duplicate A stop_code.
+  await client.execute(
+    `INSERT OR IGNORE INTO rt_stop_crosswalk (rt_stop_id, stop_id)
+     SELECT b.stop_id, s.stop_id
+       FROM stops_b b JOIN stops s ON s.stop_code = b.stop_code`,
+  );
+
   await client.execute("DROP TABLE IF EXISTS stops_b");
   return {
     platformsLinked: Number(linked.rowsAffected),
