@@ -54,7 +54,7 @@ RouteSummary { route_id, route_short_name, route_long_name, mode, color? }
 Returned in-result as `{ error: { code, message, candidates? } }`:
 
 - `not_found` — unknown `stop_id`/`route_id`.
-- `ambiguous` — a name resolved to multiple candidates → **success-shaped**: returns `candidates: StopSummary[] | RouteSummary[]` for the LLM to disambiguate with the user.
+- `ambiguous` — a name resolved to multiple candidates → **success-shaped**: returns `candidates: StopSummary[] | RouteSummary[]` for the LLM to disambiguate with the user. **Note (ADR 0002):** `plan_trip` returns candidates **top-level** (`candidates: { endpoint, matches }`) with no `error` object, because it has two endpoints and must say which is ambiguous — not nested inside `error` as this line's single-endpoint sketch implies.
 - `no_results` — valid query, nothing in window (e.g. no departures before end of service). Success-shaped (empty list + reason), not a hard error.
 - `unsupported` — capability absent for the target, e.g. `get_vehicles` on a subway route.
 - `invalid_argument` — malformed input (bad time, neither `query` nor `near`).
