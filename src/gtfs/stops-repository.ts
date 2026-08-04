@@ -39,6 +39,11 @@ export function modeForRouteType(routeType: number): Mode {
   return mode;
 }
 
+/** The GTFS route_type for a mode — for pushing a `modes` filter into SQL. */
+export function routeTypeForMode(mode: Mode): number {
+  return ROUTE_TYPE_BY_MODE[mode];
+}
+
 function pickMode(routeTypes: Iterable<number>): Mode | undefined {
   const modes = new Set<Mode>();
   for (const routeType of routeTypes) modes.add(modeForRouteType(routeType));
@@ -338,7 +343,7 @@ export async function searchStopsByName(
 const METERS_PER_DEGREE_LAT = 111_320;
 const EARTH_RADIUS_M = 6_371_000;
 
-function haversineMeters(
+export function haversineMeters(
   lat1: number,
   lon1: number,
   lat2: number,

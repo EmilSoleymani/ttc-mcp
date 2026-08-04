@@ -25,8 +25,9 @@ const WEEKDAY_COLUMNS = [
 ] as const;
 
 /** Service ids active on a given service date, per `calendar` + the
- * `calendar_dates` add/remove exceptions for that date. */
-async function activeServiceIds(
+ * `calendar_dates` add/remove exceptions for that date. Exported for the
+ * plan_trip routing layer, which resolves service days the same way. */
+export async function activeServiceIds(
   client: Client,
   date: ServiceDate,
 ): Promise<number[]> {
