@@ -2,7 +2,12 @@ import { type Client } from "@libsql/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { buildRoutingFixtureDb } from "../test-support.js";
-import { fetchBoardings, fetchDownstream, fetchFootpaths } from "./queries.js";
+import {
+  fetchBoardings,
+  fetchDownstream,
+  fetchFootpaths,
+  fetchRouteMeta,
+} from "./queries.js";
 
 // GTFS service seconds for the fixture times.
 const T = {
@@ -147,6 +152,17 @@ describe("routing queries", () => {
     });
     it("is empty for no trips", async () => {
       expect(await fetchDownstream(client, [])).toEqual([]);
+    });
+  });
+
+  describe("fetchRouteMeta", () => {
+    it("returns short name and derived mode per route", async () => {
+      const meta = await fetchRouteMeta(client, [10, 20]);
+      expect(meta.get(10)).toEqual({ route_short_name: "10", mode: "subway" });
+      expect(meta.get(20)).toEqual({ route_short_name: "20", mode: "bus" });
+    });
+    it("is empty for no routes", async () => {
+      expect((await fetchRouteMeta(client, [])).size).toBe(0);
     });
   });
 });

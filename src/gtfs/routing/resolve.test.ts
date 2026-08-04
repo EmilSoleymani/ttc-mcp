@@ -1,7 +1,7 @@
 import { type Client } from "@libsql/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildRoutingFixtureDb } from "../test-support.js";
+import { buildFixtureDb, buildRoutingFixtureDb } from "../test-support.js";
 import { accessStops, resolveBothEndpoints, resolveEndpoint } from "./index.js";
 
 describe("access-stop expansion", () => {
@@ -18,6 +18,20 @@ describe("access-stop expansion", () => {
     const byId = Object.fromEntries(access.map((a) => [a.stop.stop_id, a]));
     expect(byId["103"]?.walk_seconds).toBe(0);
     expect(byId["201"]?.walk_seconds).toBe(90);
+  });
+
+  it("expands a station to its boardable platforms, not the parent", async () => {
+    // The catalog fixture: Union Station 9000 (parent) with platform 9001.
+    const stationClient = await buildFixtureDb();
+    try {
+      const access = await accessStops(stationClient, { stop_id: 9000 });
+      const ids = access.map((a) => a.stop.stop_id);
+      expect(ids).toContain("9001");
+      expect(ids).not.toContain("9000");
+      expect(access.every((a) => a.walk_seconds === 0)).toBe(true);
+    } finally {
+      stationClient.close();
+    }
   });
 
   it("snaps a coordinate to nearby stops with sane walk times", async () => {

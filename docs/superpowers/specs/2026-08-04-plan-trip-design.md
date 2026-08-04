@@ -146,7 +146,11 @@ than its current `best`. Uses index `ix_st_trip_seq (trip_id, stop_sequence)`.
   min_walk_seconds, type FROM transfers WHERE from_stop_id IN (...)`
   (index `ix_transfers_from`).
 - **Access stops** for an endpoint:
-  - `stop_id` → the stop itself (walk 0) + its footpath neighbours.
+  - `stop_id` → the stop itself (walk 0) + its footpath neighbours. **A station
+    (parent, no `stop_times`) expands to its child platforms** (walk 0) — trips
+    reference platforms, not the station — and footpaths radiate from those
+    platforms. (Confirmed necessary against the real DB: "Union Station" resolves
+    to the parent.)
   - name → resolve (below); the resolved stop's access set as above.
   - `{lat, lon}` → `searchStopsNear(radius)`; walk = `haversine ÷ 1.3 m/s`.
     Access radius **250 m** (matches the street-transfer radius), fan-out

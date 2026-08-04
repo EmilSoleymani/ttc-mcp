@@ -1,7 +1,12 @@
 import type { Client, InValue } from "@libsql/client";
 
 import type { Mode } from "../../schemas/stop.js";
-import { asText, routeTypeForMode } from "../stops-repository.js";
+import {
+  asText,
+  modeForRouteType,
+  presence,
+  routeTypeForMode,
+} from "../stops-repository.js";
 import type { TransferType } from "../transfers.js";
 
 // The SQL layer for plan_trip's ladder
@@ -138,4 +143,36 @@ export async function fetchDownstream(
     arr: row.arr === null ? null : Number(row.arr),
     dep: row.dep === null ? null : Number(row.dep),
   }));
+}
+
+/** Route metadata for a transit leg: the short name (if present) and the mode
+ * derived from route_type. */
+export interface RouteMeta {
+  route_short_name?: string;
+  mode: Mode;
+}
+
+export async function fetchRouteMeta(
+  client: Client,
+  routeIds: readonly number[],
+): Promise<Map<number, RouteMeta>> {
+  const meta = new Map<number, RouteMeta>();
+  if (routeIds.length === 0) return meta;
+  const placeholders = routeIds.map(() => "?").join(", ");
+  const result = await client.execute({
+    sql: `SELECT route_id, route_short_name, route_type
+          FROM routes
+          WHERE route_id IN (${placeholders})`,
+    args: [...routeIds],
+  });
+  for (const row of result.rows) {
+    const shortName = presence(
+      row.route_short_name === null ? null : asText(row.route_short_name),
+    );
+    meta.set(Number(row.route_id), {
+      ...(shortName !== undefined ? { route_short_name: shortName } : {}),
+      mode: modeForRouteType(Number(row.route_type)),
+    });
+  }
+  return meta;
 }
