@@ -21,7 +21,16 @@ export interface Footpath {
   type: TransferType;
 }
 
-/** Outgoing footpaths (transfers) from any of `stopIds`. */
+/**
+ * Outgoing footpaths (transfers) from any of `stopIds`.
+ *
+ * TEMPORARY: excludes `pathway` transfers. The ingested pathway rows carry
+ * Dataset B stop_ids that were never crosswalked to Dataset A, so 91% of them
+ * connect stops kilometres apart and cause plan_trip to "teleport" (issue
+ * #39). Subway in-station interchanges still resolve via `station` transfers
+ * (shared parent_station, flat 60s). Drop this filter once #39 re-ingests
+ * correctly-namespaced pathways.
+ */
 export async function fetchFootpaths(
   client: Client,
   stopIds: readonly number[],
@@ -31,7 +40,8 @@ export async function fetchFootpaths(
   const result = await client.execute({
     sql: `SELECT from_stop_id, to_stop_id, min_walk_seconds, type
           FROM transfers
-          WHERE from_stop_id IN (${placeholders})`,
+          WHERE from_stop_id IN (${placeholders})
+            AND type != 'pathway'`,
     args: [...stopIds],
   });
   return result.rows.map((row) => ({

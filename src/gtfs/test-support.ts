@@ -354,6 +354,12 @@ export async function buildRoutingFixtureDb(): Promise<Client> {
       sql: "INSERT INTO transfers (from_stop_id, to_stop_id, min_walk_seconds, type) VALUES (?, ?, ?, ?)",
       args: [201, 103, 90, "street"],
     },
+    // A `pathway` transfer — currently excluded by the routing layer (issue
+    // #39: pathway rows carry an un-crosswalked Dataset B namespace).
+    {
+      sql: "INSERT INTO transfers (from_stop_id, to_stop_id, min_walk_seconds, type) VALUES (?, ?, ?, ?)",
+      args: [202, 203, 30, "pathway"],
+    },
   ]);
 
   return client;

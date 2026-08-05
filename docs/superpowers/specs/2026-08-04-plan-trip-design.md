@@ -144,7 +144,11 @@ than its current `best`. Uses index `ix_st_trip_seq (trip_id, stop_sequence)`.
 
 - `fetchFootpaths(client, stopIds)` — `SELECT from_stop_id, to_stop_id,
   min_walk_seconds, type FROM transfers WHERE from_stop_id IN (...)`
-  (index `ix_transfers_from`).
+  (index `ix_transfers_from`). **Temporarily excludes `type = 'pathway'`**
+  (issue #39: ingested pathway rows carry an un-crosswalked Dataset B stop_id
+  namespace — 91% connect stops kilometres apart, causing "teleport" plans;
+  found by the `npm run smoke:plan` real-DB smoke). Subway interchanges still
+  resolve via `station` transfers. Remove the filter once #39 re-ingests.
 - **Access stops** for an endpoint:
   - `stop_id` → the stop itself (walk 0) + its footpath neighbours. **A station
     (parent, no `stop_times`) expands to its child platforms** (walk 0) — trips

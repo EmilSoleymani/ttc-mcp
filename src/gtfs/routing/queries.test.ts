@@ -42,6 +42,10 @@ describe("routing queries", () => {
     it("is empty for a stop with no footpaths", async () => {
       expect(await fetchFootpaths(client, [999])).toEqual([]);
     });
+    it("excludes pathway transfers (issue #39 mitigation)", async () => {
+      // 202 has only a `pathway` transfer in the fixture.
+      expect(await fetchFootpaths(client, [202])).toEqual([]);
+    });
     it("is empty for no stops", async () => {
       expect(await fetchFootpaths(client, [])).toEqual([]);
     });
