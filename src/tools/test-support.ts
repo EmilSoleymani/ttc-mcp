@@ -81,3 +81,26 @@ export async function readResource(
     }[];
   }, deps);
 }
+
+/** Fetches an MCP prompt over a real in-memory client/server pair. */
+export async function getPrompt(
+  promptName: string,
+  args: Record<string, string>,
+  deps?: ServerDeps,
+): Promise<{
+  description?: string;
+  messages: { role: string; content: unknown }[];
+}> {
+  return withClient(async (client) => {
+    const result = await client.getPrompt({
+      name: promptName,
+      arguments: args,
+    });
+    return {
+      ...(result.description !== undefined
+        ? { description: result.description }
+        : {}),
+      messages: result.messages,
+    };
+  }, deps);
+}
