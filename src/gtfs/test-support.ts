@@ -203,6 +203,8 @@ export async function buildFixtureDb(): Promise<Client> {
  * - route 20 direction 0 splits after 202 into two headsigns (two patterns).
  * - route 30 (route_type 0) is an isolated streetcar line so a plan can
  *   exercise a `mode: "streetcar"` leg end-to-end.
+ * - routes 40 & 41 both run Alpha (401) -> Beta (402) at different times, for
+ *   alternates (distinct route-signature) tests — 40 is the faster option.
  * - "Broadview Station"/"Broadview Junction" share a name substring → an
  *   ambiguous name-resolution case; "Distillery Loop" is unique.
  */
@@ -234,6 +236,22 @@ export async function buildRoutingFixtureDb(): Promise<Client> {
         route_short_name: "30",
         route_long_name: "Streetcar C",
         route_type: "0",
+        route_color: "",
+      },
+      // Two parallel bus routes serving the same Alpha->Beta pair, for
+      // alternates (distinct route-signature) tests.
+      {
+        route_id: "40",
+        route_short_name: "40",
+        route_long_name: "Route D",
+        route_type: "3",
+        route_color: "",
+      },
+      {
+        route_id: "41",
+        route_short_name: "41",
+        route_long_name: "Route E",
+        route_type: "3",
         route_color: "",
       },
     ]),
@@ -271,6 +289,9 @@ export async function buildRoutingFixtureDb(): Promise<Client> {
       stopRow("301", "Harbourfront Loop", "43.630000", "-79.380000"),
       stopRow("302", "Queens Quay", "43.628000", "-79.385000"),
       stopRow("303", "Spadina Loop", "43.626000", "-79.390000"),
+      // Alpha/Beta: served by two parallel routes (40, 41) for alternates.
+      stopRow("401", "Alpha Loop", "43.680000", "-79.400000"),
+      stopRow("402", "Beta Loop", "43.685000", "-79.400000"),
     ]),
   );
 
@@ -316,6 +337,8 @@ export async function buildRoutingFixtureDb(): Promise<Client> {
       tripRow("110", "20", "Broadview Station"),
       tripRow("111", "20", "Broadview Junction"),
       tripRow("300", "30", "Spadina Loop"),
+      tripRow("400", "40", "Beta"),
+      tripRow("410", "41", "Beta"),
     ]),
   );
 
@@ -360,6 +383,11 @@ export async function buildRoutingFixtureDb(): Promise<Client> {
       st("300", "301", "1", "9:00:00"),
       st("300", "302", "2", "9:03:00"),
       st("300", "303", "3", "9:06:00"),
+      // routes 40 & 41 — parallel Alpha->Beta service (route 40 is faster)
+      st("400", "401", "1", "10:00:00"),
+      st("400", "402", "2", "10:10:00"),
+      st("410", "401", "1", "10:02:00"),
+      st("410", "402", "2", "10:15:00"),
     ]),
   );
 

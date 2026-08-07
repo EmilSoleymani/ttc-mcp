@@ -2,6 +2,7 @@ import type { Client } from "@libsql/client";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { RtClient } from "./gtfs-rt/rt-client.js";
+import { registerPlanATrip } from "./prompts/plan-a-trip.js";
 import { registerResources } from "./resources.js";
 import { registerGetAlerts } from "./tools/get-alerts.js";
 import { registerGetArrivals } from "./tools/get-arrivals.js";
@@ -37,6 +38,7 @@ export function registerTools(server: McpServer, deps: ServerDeps): void {
   registerGetAlerts(server, deps);
   registerGetArrivals(server, deps);
   registerPlanTrip(server, deps);
+  registerPlanATrip(server);
   registerResources(server, deps);
 }
 
