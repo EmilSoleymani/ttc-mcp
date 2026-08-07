@@ -55,6 +55,57 @@ export async function activeServiceIds(
   return [...active];
 }
 
+// #33 — a live prediction and its scheduled counterpart are the same trip only
+// if their times sit within this window; a nearest scheduled departure further
+// out than this is treated as "no schedule to compare against" and
+// `delay_seconds` is omitted rather than reporting a bogus multi-hour delay.
+const DELAY_MATCH_WINDOW_SECONDS = 2 * 60 * 60;
+
+/**
+ * `delay_seconds` for a live arrival: predicted − the nearest scheduled
+ * departure of the same route at the same stop (positive = late). The queried
+ * `stopId` is a single physical stop/platform, which one direction serves, so
+ * "nearest scheduled departure of this route here" already isolates the right
+ * scheduled trip without needing the (RT-unavailable) trip identity. Searches
+ * the prediction's service date ±1 day to cover post-midnight GTFS times.
+ * Returns `undefined` when nothing scheduled is within
+ * `DELAY_MATCH_WINDOW_SECONDS` — the caller then omits `delay_seconds`.
+ */
+export async function scheduledDelaySeconds(
+  client: Client,
+  stopId: number,
+  routeId: number,
+  predictedEpochSeconds: number,
+): Promise<number | undefined> {
+  const predictedMs = predictedEpochSeconds * 1000;
+  const today = serviceDateAt(new Date(predictedMs));
+  let nearest: number | undefined;
+  for (let offset = -1; offset <= 1; offset++) {
+    const date = addDays(today, offset);
+    const serviceIds = await activeServiceIds(client, date);
+    if (serviceIds.length === 0) continue;
+    const placeholders = serviceIds.map(() => "?").join(", ");
+    const result = await client.execute({
+      sql: `SELECT st.dep AS dep
+            FROM stop_times st JOIN trips t ON t.trip_id = st.trip_id
+            WHERE st.stop_id = ? AND t.route_id = ?
+              AND t.service_id IN (${placeholders}) AND st.dep IS NOT NULL`,
+      args: [stopId, routeId, ...serviceIds],
+    });
+    for (const row of result.rows) {
+      const absMs = absoluteTimeFor(date, Number(row.dep)).getTime();
+      const diff = Math.round((predictedMs - absMs) / 1000);
+      if (nearest === undefined || Math.abs(diff) < Math.abs(nearest)) {
+        nearest = diff;
+      }
+    }
+  }
+  if (nearest === undefined || Math.abs(nearest) > DELAY_MATCH_WINDOW_SECONDS) {
+    return undefined;
+  }
+  return nearest;
+}
+
 interface RawDeparture {
   stop_id: number;
   dep: number;

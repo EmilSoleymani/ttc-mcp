@@ -85,6 +85,9 @@ export interface FixtureStopTimeUpdate {
   /** Predicted arrival epoch seconds (falls back to `departure` per spec). */
   arrivalSeconds?: number;
   departureSeconds?: number;
+  /** GTFS-RT StopTimeUpdate.ScheduleRelationship (SCHEDULED=0, SKIPPED=1,
+   * NO_DATA=2, UNSCHEDULED=3); omitted → the proto default (SCHEDULED). */
+  scheduleRelationship?: transit_realtime.TripUpdate.StopTimeUpdate.ScheduleRelationship;
 }
 
 export interface FixtureTripUpdate {
@@ -122,6 +125,7 @@ export function encodeTripUpdatesFeed(
             stu.departureSeconds !== undefined
               ? { time: stu.departureSeconds }
               : null,
+          scheduleRelationship: stu.scheduleRelationship ?? null,
         })),
       },
     })),

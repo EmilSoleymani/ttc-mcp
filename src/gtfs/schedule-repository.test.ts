@@ -1,7 +1,7 @@
 import { type Client } from "@libsql/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { getSchedule } from "./schedule-repository.js";
+import { getSchedule, scheduledDelaySeconds } from "./schedule-repository.js";
 import { buildFixtureDb } from "./test-support.js";
 
 describe("schedule repository", () => {
@@ -256,5 +256,46 @@ describe("schedule repository", () => {
     });
     expect(result?.departures[0]?.scheduled_time).toMatch(/^2026-07-24T20:00/);
     expect(result?.truncated).toBe(true);
+  });
+});
+
+describe("scheduledDelaySeconds", () => {
+  let client: Client;
+  beforeEach(async () => {
+    client = await buildFixtureDb();
+  });
+  afterEach(() => {
+    client.close();
+  });
+
+  // The fixture schedules route 900 at stop 662 departing 06:10:00 daily.
+  const scheduled = Math.floor(
+    new Date("2026-07-24T06:10:00-04:00").getTime() / 1000,
+  );
+
+  it("reports a positive delay when the prediction is later than schedule", async () => {
+    const delay = await scheduledDelaySeconds(client, 662, 900, scheduled + 90);
+    expect(delay).toBe(90);
+  });
+
+  it("reports a negative delay when the prediction is earlier (running early)", async () => {
+    const delay = await scheduledDelaySeconds(client, 662, 900, scheduled - 45);
+    expect(delay).toBe(-45);
+  });
+
+  it("omits (undefined) when no scheduled trip is within the match window", async () => {
+    // Midday: the only scheduled departure (06:10) is hours away.
+    const midday = Math.floor(
+      new Date("2026-07-24T12:00:00-04:00").getTime() / 1000,
+    );
+    expect(
+      await scheduledDelaySeconds(client, 662, 900, midday),
+    ).toBeUndefined();
+  });
+
+  it("omits when the route does not serve the stop", async () => {
+    expect(
+      await scheduledDelaySeconds(client, 662, 1, scheduled),
+    ).toBeUndefined();
   });
 });
