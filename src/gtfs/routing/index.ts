@@ -1,8 +1,12 @@
 import type { Client } from "@libsql/client";
 
 import { type ToolError, toolError } from "../../errors.js";
-import type { Candidates, Endpoint } from "../../schemas/itinerary.js";
-import type { StopSummary } from "../../schemas/stop.js";
+import type {
+  Candidates,
+  Endpoint,
+  Itinerary,
+} from "../../schemas/itinerary.js";
+import type { Mode, StopSummary } from "../../schemas/stop.js";
 import { toStopSummary as summaryFromDetail } from "../schedule-repository.js";
 import {
   getStopById,
@@ -10,7 +14,9 @@ import {
   searchStopsByName,
   searchStopsNear,
 } from "../stops-repository.js";
+import { runLadder } from "./ladder.js";
 import { fetchFootpaths } from "./queries.js";
+import { reconstructItinerary } from "./reconstruct.js";
 
 // Endpoint resolution and access-stop expansion for plan_trip
 // (docs/superpowers/specs/2026-08-04-plan-trip-design.md §"Endpoint resolution",
@@ -62,14 +68,26 @@ export async function accessStops(
 
   const detail = await getStopById(client, point.stop_id);
   if (!detail) return [];
-  const access: AccessStop[] = [
-    { stop: summaryFromDetail(detail), walk_seconds: 0 },
-  ];
 
-  const footpaths = await fetchFootpaths(client, [point.stop_id]);
-  // Keep the cheapest walk when several footpaths reach the same neighbour.
+  // A station (parent) carries no stop_times — trips reference its child
+  // platforms. Board from the platforms (walk 0, you're already at the
+  // station); a plain stop boards from itself.
+  const platforms = detail.is_station ? (detail.platforms ?? []) : [];
+  const access: AccessStop[] =
+    platforms.length > 0
+      ? platforms.map((stop) => ({ stop, walk_seconds: 0 }))
+      : [{ stop: summaryFromDetail(detail), walk_seconds: 0 }];
+
+  // Footpaths radiate from the actual boardable stops (the platforms for a
+  // station, else the stop itself).
+  const originIds = access.map((a) => Number(a.stop.stop_id));
+  const alreadyAccess = new Set(originIds);
+  const footpaths = await fetchFootpaths(client, originIds);
+  // Keep the cheapest walk when several footpaths reach the same neighbour;
+  // skip neighbours already boardable (e.g. a sibling platform).
   const cheapest = new Map<number, number>();
   for (const fp of footpaths) {
+    if (alreadyAccess.has(fp.to_stop_id)) continue;
     const prev = cheapest.get(fp.to_stop_id);
     if (prev === undefined || fp.min_walk_seconds < prev) {
       cheapest.set(fp.to_stop_id, fp.min_walk_seconds);
@@ -187,4 +205,49 @@ export async function resolveBothEndpoints(
     fromAccess: rf.access,
     toAccess: rt.access,
   };
+}
+
+export interface PlanDepartAfterParams {
+  from: StopSummary;
+  to: StopSummary;
+  fromAccess: AccessPoint;
+  toAccess: AccessPoint;
+  depart: Date;
+  maxTransfers: number;
+  modes?: readonly Mode[];
+}
+
+/**
+ * The depart-after plan for one earliest-arrival itinerary: expand both
+ * endpoints to access stops, run the ladder, and reconstruct. Returns
+ * undefined when the destination is unreachable within the search bounds.
+ * (arrive_by, alternates, and ranking are a later slice.)
+ */
+export async function planDepartAfter(
+  client: Client,
+  params: PlanDepartAfterParams,
+): Promise<Itinerary | undefined> {
+  const originAccess = await accessStops(client, params.fromAccess);
+  const destAccess = await accessStops(client, params.toAccess);
+  const departMs = params.depart.getTime();
+
+  const best = await runLadder(client, {
+    originAccess: originAccess.map((a) => ({
+      stopId: Number(a.stop.stop_id),
+      walk: a.walk_seconds,
+    })),
+    departMs,
+    maxTransfers: params.maxTransfers,
+    ...(params.modes !== undefined ? { modes: params.modes } : {}),
+  });
+
+  return reconstructItinerary(client, best, {
+    from: params.from,
+    to: params.to,
+    destAccess: destAccess.map((a) => ({
+      stopId: Number(a.stop.stop_id),
+      walk: a.walk_seconds,
+    })),
+    departMs,
+  });
 }

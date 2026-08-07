@@ -195,11 +195,14 @@ export async function buildFixtureDb(): Promise<Client> {
  *                                         | street transfer (90 s)
  *   route 20 (bus):     201 --- 202 --< 203  "Broadview Station"
  *                                       \  204  "Broadview Junction"   (branch)
+ *   route 30 (streetcar): 301 --- 302 --- 303   (standalone, 09:00)
  *
  * - route 10 has a normal trip (100, 08:00), a later trip (101, 08:30) — for
  *   per-stop threshold / earliest-per-pattern tests — and a past-midnight trip
  *   (102, 25:00) for the windowed service-day time base.
  * - route 20 direction 0 splits after 202 into two headsigns (two patterns).
+ * - route 30 (route_type 0) is an isolated streetcar line so a plan can
+ *   exercise a `mode: "streetcar"` leg end-to-end.
  * - "Broadview Station"/"Broadview Junction" share a name substring → an
  *   ambiguous name-resolution case; "Distillery Loop" is unique.
  */
@@ -224,6 +227,13 @@ export async function buildRoutingFixtureDb(): Promise<Client> {
         route_short_name: "20",
         route_long_name: "Route B",
         route_type: "3",
+        route_color: "",
+      },
+      {
+        route_id: "30",
+        route_short_name: "30",
+        route_long_name: "Streetcar C",
+        route_type: "0",
         route_color: "",
       },
     ]),
@@ -255,6 +265,12 @@ export async function buildRoutingFixtureDb(): Promise<Client> {
       stopRow("202", "Eastgate", "43.665000", "-79.375000"),
       stopRow("203", "Broadview Station", "43.670000", "-79.370000"),
       stopRow("204", "Broadview Junction", "43.665000", "-79.370000"),
+      // A standalone streetcar (route 30) line, well away from the rest so it
+      // never perturbs the subway/bus network's exact-match assertions or the
+      // coordinate-snap test point.
+      stopRow("301", "Harbourfront Loop", "43.630000", "-79.380000"),
+      stopRow("302", "Queens Quay", "43.628000", "-79.385000"),
+      stopRow("303", "Spadina Loop", "43.626000", "-79.390000"),
     ]),
   );
 
@@ -299,6 +315,7 @@ export async function buildRoutingFixtureDb(): Promise<Client> {
       tripRow("102", "10", "Aend"),
       tripRow("110", "20", "Broadview Station"),
       tripRow("111", "20", "Broadview Junction"),
+      tripRow("300", "30", "Spadina Loop"),
     ]),
   );
 
@@ -339,6 +356,10 @@ export async function buildRoutingFixtureDb(): Promise<Client> {
       st("111", "201", "1", "8:17:00"),
       st("111", "202", "2", "8:22:00"),
       st("111", "204", "3", "8:32:00"),
+      // route 30 — the streetcar line
+      st("300", "301", "1", "9:00:00"),
+      st("300", "302", "2", "9:03:00"),
+      st("300", "303", "3", "9:06:00"),
     ]),
   );
 
@@ -353,6 +374,12 @@ export async function buildRoutingFixtureDb(): Promise<Client> {
     {
       sql: "INSERT INTO transfers (from_stop_id, to_stop_id, min_walk_seconds, type) VALUES (?, ?, ?, ?)",
       args: [201, 103, 90, "street"],
+    },
+    // A `pathway` transfer — currently excluded by the routing layer (issue
+    // #39: pathway rows carry an un-crosswalked Dataset B namespace).
+    {
+      sql: "INSERT INTO transfers (from_stop_id, to_stop_id, min_walk_seconds, type) VALUES (?, ?, ?, ?)",
+      args: [202, 203, 30, "pathway"],
     },
   ]);
 
