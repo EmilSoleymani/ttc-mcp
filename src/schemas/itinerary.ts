@@ -91,7 +91,9 @@ export const planTripInputShape = {
   modes: z
     .array(modeSchema)
     .optional()
-    .describe("Restrict to these modes (subway|streetcar|bus)."),
+    .describe(
+      "Restrict to these modes (subway|streetcar|bus). Omit or pass [] for no restriction (all modes).",
+    ),
   max_itineraries: z
     .number()
     .int()
