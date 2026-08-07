@@ -138,6 +138,20 @@ For each boarded `(trip_id, board_seq)`, relax every downstream stop
 (`stop_sequence > board_seq`) to `absoluteTimeFor(date, arr ?? dep)` if earlier
 than its current `best`. Uses index `ix_st_trip_seq (trip_id, stop_sequence)`.
 
+### Performance (PR3)
+
+Two optimizations keep a cross-city plan interactive (Union→Kipling: ~1.8 s a
+solve, down from ~6.8 s):
+
+- **Target pruning.** The ladder takes the destination access stops and tracks
+  the best-known arrival at the destination; any boarding or relaxation that
+  can't beat it is skipped. Correctness-preserving (the optimal path's arrivals
+  are all below that bound), a large win on long trips.
+- **Candidate service-day filtering.** Of `{D-1, D, D+1}`, only dates whose
+  trip span `[midnight, midnight+30h]` overlaps `[depart, depart+horizon]` are
+  queried — a daytime departure drops to just `D`, cutting per-round boarding
+  queries 3×. Overnight/cross-midnight cases still include `D-1`/`D+1`.
+
 ### Footpaths & access stops
 
 `gtfs/routing/queries.ts`:

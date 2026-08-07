@@ -14,9 +14,21 @@ import {
   searchStopsByName,
   searchStopsNear,
 } from "../stops-repository.js";
-import { runLadder } from "./ladder.js";
+import { MAX_HORIZON_SECONDS, type OriginAccess, runLadder } from "./ladder.js";
 import { fetchFootpaths } from "./queries.js";
+import {
+  dedupeBySignature,
+  routeSignature,
+  sortByArrival,
+  sortByLatestDeparture,
+} from "./rank.js";
 import { reconstructItinerary } from "./reconstruct.js";
+
+// arrive_by is emulated: solve an anchor for the fastest travel time, then
+// probe depart-after from ~target − Δ − slack and push the departure later
+// while arrivals stay within the target. The slack absorbs the anchor's Δ
+// estimate error.
+const ARRIVE_BY_SLACK_SECONDS = 20 * 60;
 
 // Endpoint resolution and access-stop expansion for plan_trip
 // (docs/superpowers/specs/2026-08-04-plan-trip-design.md §"Endpoint resolution",
@@ -207,47 +219,212 @@ export async function resolveBothEndpoints(
   };
 }
 
-export interface PlanDepartAfterParams {
+export interface PlanEndpoints {
   from: StopSummary;
   to: StopSummary;
   fromAccess: AccessPoint;
   toAccess: AccessPoint;
-  depart: Date;
   maxTransfers: number;
   modes?: readonly Mode[];
 }
 
+// Everything a single solve needs, with the access-stop expansion done once so
+// the alternates / arrive_by loops can re-solve at shifted departures cheaply.
+interface SolveContext {
+  from: StopSummary;
+  to: StopSummary;
+  originAccess: OriginAccess[];
+  destAccess: OriginAccess[];
+  maxTransfers: number;
+  modes?: readonly Mode[];
+}
+
+async function buildSolveContext(
+  client: Client,
+  endpoints: PlanEndpoints,
+): Promise<SolveContext> {
+  const toOriginAccess = (stops: Awaited<ReturnType<typeof accessStops>>) =>
+    stops.map((a) => ({
+      stopId: Number(a.stop.stop_id),
+      walk: a.walk_seconds,
+    }));
+  return {
+    from: endpoints.from,
+    to: endpoints.to,
+    originAccess: toOriginAccess(
+      await accessStops(client, endpoints.fromAccess),
+    ),
+    destAccess: toOriginAccess(await accessStops(client, endpoints.toAccess)),
+    maxTransfers: endpoints.maxTransfers,
+    ...(endpoints.modes !== undefined ? { modes: endpoints.modes } : {}),
+  };
+}
+
+/** One earliest-arrival solve at `departMs`: run the ladder, reconstruct. */
+async function solveDepartAfter(
+  client: Client,
+  ctx: SolveContext,
+  departMs: number,
+): Promise<Itinerary | undefined> {
+  const best = await runLadder(client, {
+    originAccess: ctx.originAccess,
+    targetAccess: ctx.destAccess,
+    departMs,
+    maxTransfers: ctx.maxTransfers,
+    ...(ctx.modes !== undefined ? { modes: ctx.modes } : {}),
+  });
+  return reconstructItinerary(client, best, {
+    from: ctx.from,
+    to: ctx.to,
+    destAccess: ctx.destAccess,
+    departMs,
+  });
+}
+
+/** The absolute epoch ms the rider boards the first transit leg. */
+function firstBoardMs(itinerary: Itinerary): number {
+  for (const leg of itinerary.legs) {
+    if (leg.type === "transit") return new Date(leg.board_time).getTime();
+  }
+  // reconstruction guarantees at least one transit leg.
+  return new Date(itinerary.depart_time).getTime();
+}
+
+export interface PlanDepartAfterParams extends PlanEndpoints {
+  depart: Date;
+}
+
 /**
- * The depart-after plan for one earliest-arrival itinerary: expand both
- * endpoints to access stops, run the ladder, and reconstruct. Returns
- * undefined when the destination is unreachable within the search bounds.
- * (arrive_by, alternates, and ranking are a later slice.)
+ * The depart-after plan for one earliest-arrival itinerary. Retained for the
+ * real-DB smoke and single-solve callers; `planTrip` is the full entry.
  */
 export async function planDepartAfter(
   client: Client,
   params: PlanDepartAfterParams,
 ): Promise<Itinerary | undefined> {
-  const originAccess = await accessStops(client, params.fromAccess);
-  const destAccess = await accessStops(client, params.toAccess);
-  const departMs = params.depart.getTime();
+  const ctx = await buildSolveContext(client, params);
+  return solveDepartAfter(client, ctx, params.depart.getTime());
+}
 
-  const best = await runLadder(client, {
-    originAccess: originAccess.map((a) => ({
-      stopId: Number(a.stop.stop_id),
-      walk: a.walk_seconds,
-    })),
-    departMs,
-    maxTransfers: params.maxTransfers,
-    ...(params.modes !== undefined ? { modes: params.modes } : {}),
-  });
+export interface PlanTripParams extends PlanEndpoints {
+  when: Date;
+  arriveBy: boolean;
+  maxItineraries: number;
+}
 
-  return reconstructItinerary(client, best, {
-    from: params.from,
-    to: params.to,
-    destAccess: destAccess.map((a) => ({
-      stopId: Number(a.stop.stop_id),
-      walk: a.walk_seconds,
-    })),
-    departMs,
-  });
+/**
+ * Plan up to `maxItineraries` distinct itineraries. Depart-after: earliest
+ * arrival plus alternates from shifted departures, deduped by route signature,
+ * ranked by arrival. (arrive_by emulation is added in the next task.)
+ */
+export async function planTrip(
+  client: Client,
+  params: PlanTripParams,
+): Promise<Itinerary[]> {
+  const ctx = await buildSolveContext(client, params);
+  if (params.arriveBy) {
+    return planArriveBy(
+      client,
+      ctx,
+      params.when.getTime(),
+      params.maxItineraries,
+    );
+  }
+  const collected = await collectShiftedForward(
+    client,
+    ctx,
+    params.when.getTime(),
+    params.maxItineraries,
+  );
+  return sortByArrival(collected).slice(0, params.maxItineraries);
+}
+
+/**
+ * arrive_by emulation. Anchor-solve to learn the fastest travel time Δ (and
+ * that the destination is reachable by the target at all), then scan
+ * depart-after from ~target − Δ − slack, collecting itineraries that still
+ * arrive by the target and pushing the departure later until they no longer
+ * do. Ranked by latest departure; the early anchor is a last-resort fallback.
+ */
+async function planArriveBy(
+  client: Client,
+  ctx: SolveContext,
+  targetMs: number,
+  maxItineraries: number,
+): Promise<Itinerary[]> {
+  const anchor = await solveDepartAfter(
+    client,
+    ctx,
+    targetMs - MAX_HORIZON_SECONDS * 1000,
+  );
+  // Unreachable, or nothing arrives by the target from within the horizon.
+  if (!anchor || new Date(anchor.arrive_time).getTime() > targetMs) return [];
+
+  const deltaMs = anchor.duration_seconds * 1000;
+  const feasible: Itinerary[] = [];
+  let departMs = targetMs - deltaMs - ARRIVE_BY_SLACK_SECONDS * 1000;
+
+  const maxAttempts = 4 * maxItineraries + 8;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const itinerary = await solveDepartAfter(client, ctx, departMs);
+    if (!itinerary) break;
+    const arriveMs = new Date(itinerary.arrive_time).getTime();
+    if (arriveMs <= targetMs) {
+      feasible.push(itinerary);
+    } else {
+      // Later departures only arrive later — the boundary is passed.
+      break;
+    }
+    const next = firstBoardMs(itinerary) + 1000;
+    departMs = next > departMs ? next : departMs + 60_000;
+  }
+
+  // The anchor is feasible (checked above); fall back to it only if the probe
+  // window found nothing (a Δ under-estimate).
+  const ranked = dedupeBySignature(
+    sortByLatestDeparture(feasible.length > 0 ? feasible : [anchor]),
+  );
+  return ranked.slice(0, maxItineraries);
+}
+
+/**
+ * Solve depart-after repeatedly, each time shifting the departure to just after
+ * the previous itinerary's first boarding, collecting distinct route
+ * signatures until `count` are found or the attempt budget is spent.
+ */
+async function collectShiftedForward(
+  client: Client,
+  ctx: SolveContext,
+  baseMs: number,
+  count: number,
+): Promise<Itinerary[]> {
+  const out: Itinerary[] = [];
+  const seen = new Set<string>();
+  let departMs = baseMs;
+  let consecutiveDupes = 0;
+  const maxAttempts = 2 * count + 2;
+  // On a single-corridor trip every shift returns the same route; stop after a
+  // couple of repeats rather than burning the whole attempt budget re-solving.
+  const maxConsecutiveDupes = 2;
+  for (
+    let attempt = 0;
+    attempt < maxAttempts && out.length < count;
+    attempt++
+  ) {
+    const itinerary = await solveDepartAfter(client, ctx, departMs);
+    if (!itinerary) break;
+    const sig = routeSignature(itinerary);
+    if (seen.has(sig)) {
+      if (++consecutiveDupes >= maxConsecutiveDupes) break;
+    } else {
+      seen.add(sig);
+      out.push(itinerary);
+      consecutiveDupes = 0;
+    }
+    // Advance past this itinerary's first departure so the next solve finds a
+    // later option (guaranteed to make progress).
+    const next = firstBoardMs(itinerary) + 1000;
+    departMs = next > departMs ? next : departMs + 60_000;
+  }
+  return out;
 }
