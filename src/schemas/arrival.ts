@@ -3,7 +3,8 @@ import { z } from "zod";
 import { toolErrorSchema } from "../errors.js";
 import { stopSummarySchema } from "./stop.js";
 
-// docs/spec/tool-schemas.md #6. delay_seconds is deferred to #33.
+// docs/spec/tool-schemas.md #6. delay_seconds is populated for pattern-matched
+// live arrivals (#33) and omitted otherwise (scheduled, or unmatched live).
 export const arrivalSchema = z.object({
   route_id: z.string(),
   route_short_name: z.string().optional(),

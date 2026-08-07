@@ -23,6 +23,7 @@
     "ingest": "tsx src/entry/ingest.ts",
     "check-gtfs-freshness": "tsx src/entry/check-freshness.ts",
     "validate-rt-join": "tsx src/entry/validate-rt-join.ts",
+    "measure-headsign-recovery": "tsx src/entry/measure-headsign-recovery.ts",
     "smoke": "tsx src/entry/smoke.ts",
     "smoke:plan": "tsx src/entry/plan-smoke.ts",
     "build": "tsc -p tsconfig.build.json",
