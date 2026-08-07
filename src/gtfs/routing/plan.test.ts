@@ -60,6 +60,21 @@ describe("planDepartAfter", () => {
     });
   });
 
+  it("plans a streetcar leg end-to-end", async () => {
+    const itin = await plan(client, "301", "303", "2026-08-04T09:00:00-04:00");
+    expect(itin).toBeDefined();
+    expect(itin?.transfers).toBe(0);
+    expect(itin?.legs).toHaveLength(1);
+    expect(itin?.legs[0]).toMatchObject({
+      type: "transit",
+      mode: "streetcar",
+      route_id: "30",
+      board: { stop_id: "301" },
+      alight: { stop_id: "303" },
+      num_stops: 2,
+    });
+  });
+
   it("plans a two-seat multimodal ride with a street transfer", async () => {
     const itin = await plan(client, "101", "203", "2026-08-04T08:00:00-04:00");
     expect(itin).toBeDefined();
