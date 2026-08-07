@@ -178,6 +178,37 @@ export async function reconstructItinerary(
     arrive_time: toIsoWithTorontoOffset(new Date(arriveMs)),
     duration_seconds: Math.round((arriveMs - departMs) / 1000),
     transfers: transits.length - 1,
-    legs,
+    legs: mergeConsecutiveTransferLegs(legs),
   };
+}
+
+/**
+ * Collapse any run of consecutive transfer legs into one direct walk. The
+ * ladder never chains footpaths mid-search, but reconstruction can still place
+ * a ladder interchange immediately before the egress walk (or after the access
+ * walk), producing back-to-back transfers that route the rider through a
+ * pointless waypoint. Merging restores the invariant "a transfer leg is
+ * flanked by transit legs (or is the sole access/egress walk)". `walk_seconds`
+ * is summed — it must stay equal to the walk time the ladder budgeted into the
+ * arrival label — while the endpoints become first.from → last.to. A merged
+ * zero-length walk (from === to) is dropped.
+ */
+export function mergeConsecutiveTransferLegs(legs: readonly Leg[]): Leg[] {
+  const merged: Leg[] = [];
+  for (const leg of legs) {
+    const prev = merged[merged.length - 1];
+    if (leg.type === "transfer" && prev?.type === "transfer") {
+      merged[merged.length - 1] = {
+        type: "transfer",
+        from: prev.from,
+        to: leg.to,
+        walk_seconds: prev.walk_seconds + leg.walk_seconds,
+      };
+    } else {
+      merged.push(leg);
+    }
+  }
+  return merged.filter(
+    (leg) => leg.type !== "transfer" || leg.from.stop_id !== leg.to.stop_id,
+  );
 }

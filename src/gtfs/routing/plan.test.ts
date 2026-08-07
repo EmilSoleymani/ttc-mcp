@@ -1,15 +1,15 @@
 import { type Client } from "@libsql/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { Itinerary } from "../../schemas/itinerary.js";
+import type { Endpoint, Itinerary } from "../../schemas/itinerary.js";
 import { buildRoutingFixtureDb } from "../test-support.js";
 import { planDepartAfter, resolveBothEndpoints } from "./index.js";
 
 // Resolve two endpoints and plan a depart-after trip, the way the tool will.
 async function plan(
   client: Client,
-  from: string,
-  to: string,
+  from: Endpoint,
+  to: Endpoint,
   when: string,
   opts: {
     maxTransfers?: number;
@@ -110,6 +110,50 @@ describe("planDepartAfter", () => {
   it("returns no itinerary when the destination is unreachable", async () => {
     // The fixture routes run in one direction only; 203 -> 101 has no service.
     const itin = await plan(client, "203", "101", "2026-08-04T08:00:00-04:00");
+    expect(itin).toBeUndefined();
+  });
+
+  it("plans across midnight via the D-1 service-day carryover", async () => {
+    // The fixture's route-10 past-midnight trip departs 101 at 25:00 (= 01:00
+    // the next calendar day) on the prior service day. A plan leaving at 00:10
+    // must find it via the D-1 window, not wait for the 08:00 same-day trip.
+    const itin = await plan(client, "101", "103", "2026-08-05T00:10:00-04:00");
+    expect(itin).toBeDefined();
+    expect(itin?.depart_time).toBe("2026-08-05T01:00:00-04:00");
+    expect(itin?.arrive_time).toBe("2026-08-05T01:10:00-04:00");
+  });
+
+  it("plans from a lat/lon origin, snapping to a nearby stop", async () => {
+    // ~10 m north of stop 101 (43.65, -79.38): resolves `from` to stop 101 and
+    // boards there (the sub-10 s snap walk is folded into the reported origin,
+    // not shown as a leg — v1 snaps to nearby stops).
+    const from = { lat: 43.6501, lon: -79.38 };
+    const both = await resolveBothEndpoints(client, from, "103");
+    if (both.kind !== "ok") throw new Error(`expected ok, got ${both.kind}`);
+    expect(both.from.stop_id).toBe("101");
+
+    const itin = await planDepartAfter(client, {
+      from: both.from,
+      to: both.to,
+      fromAccess: both.fromAccess,
+      toAccess: both.toAccess,
+      depart: new Date("2026-08-04T08:00:00-04:00"),
+      maxTransfers: 3,
+    });
+    expect(itin).toBeDefined();
+    const firstTransit = itin?.legs.find((l) => l.type === "transit");
+    expect(firstTransit).toMatchObject({ board: { stop_id: "101" } });
+  });
+
+  it("returns no itinerary for from === to", async () => {
+    const itin = await plan(client, "101", "101", "2026-08-04T08:00:00-04:00");
+    expect(itin).toBeUndefined();
+  });
+
+  it("returns no itinerary when the next service is beyond the search horizon", async () => {
+    // At 01:30 the next route-10 trip is 08:00 (6.5 h out), past the 6 h
+    // horizon; the overnight 25:00 trip has already departed.
+    const itin = await plan(client, "101", "103", "2026-08-04T01:30:00-04:00");
     expect(itin).toBeUndefined();
   });
 });

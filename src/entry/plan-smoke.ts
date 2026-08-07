@@ -107,6 +107,20 @@ function maxTransferMeters(itin: Itinerary): number {
   return max;
 }
 
+/** Two consecutive transfer legs mean a walk routed through a pointless
+ * waypoint (reconstruction should have merged them). */
+function hasAdjacentTransfers(itin: Itinerary): boolean {
+  for (let i = 1; i < itin.legs.length; i++) {
+    if (
+      itin.legs[i]!.type === "transfer" &&
+      itin.legs[i - 1]!.type === "transfer"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function run(): Promise<void> {
   const url = process.env.LIBSQL_URL ?? "file:./data/ttc.db";
   if (url.startsWith("file:")) {
@@ -157,7 +171,8 @@ async function run(): Promise<void> {
           routes.size >= 2 &&
           itin.transfers >= 1 &&
           timesMonotonic(itin) &&
-          farthestWalk <= MAX_TRANSFER_METERS;
+          farthestWalk <= MAX_TRANSFER_METERS &&
+          !hasAdjacentTransfers(itin);
         record(
           "cross-line plan",
           good,
