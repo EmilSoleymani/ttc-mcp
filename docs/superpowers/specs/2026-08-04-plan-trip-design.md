@@ -138,15 +138,37 @@ For each boarded `(trip_id, board_seq)`, relax every downstream stop
 (`stop_sequence > board_seq`) to `absoluteTimeFor(date, arr ?? dep)` if earlier
 than its current `best`. Uses index `ix_st_trip_seq (trip_id, stop_sequence)`.
 
+### Performance (PR3)
+
+Two optimizations keep a cross-city plan interactive (Union→Kipling: ~1.8 s a
+solve, down from ~6.8 s):
+
+- **Target pruning.** The ladder takes the destination access stops and tracks
+  the best-known arrival at the destination; any boarding or relaxation that
+  can't beat it is skipped. Correctness-preserving (the optimal path's arrivals
+  are all below that bound), a large win on long trips.
+- **Candidate service-day filtering.** Of `{D-1, D, D+1}`, only dates whose
+  trip span `[midnight, midnight+30h]` overlaps `[depart, depart+horizon]` are
+  queried — a daytime departure drops to just `D`, cutting per-round boarding
+  queries 3×. Overnight/cross-midnight cases still include `D-1`/`D+1`.
+
 ### Footpaths & access stops
 
 `gtfs/routing/queries.ts`:
 
 - `fetchFootpaths(client, stopIds)` — `SELECT from_stop_id, to_stop_id,
   min_walk_seconds, type FROM transfers WHERE from_stop_id IN (...)`
-  (index `ix_transfers_from`).
+  (index `ix_transfers_from`). **Temporarily excludes `type = 'pathway'`**
+  (issue #39: ingested pathway rows carry an un-crosswalked Dataset B stop_id
+  namespace — 91% connect stops kilometres apart, causing "teleport" plans;
+  found by the `npm run smoke:plan` real-DB smoke). Subway interchanges still
+  resolve via `station` transfers. Remove the filter once #39 re-ingests.
 - **Access stops** for an endpoint:
-  - `stop_id` → the stop itself (walk 0) + its footpath neighbours.
+  - `stop_id` → the stop itself (walk 0) + its footpath neighbours. **A station
+    (parent, no `stop_times`) expands to its child platforms** (walk 0) — trips
+    reference platforms, not the station — and footpaths radiate from those
+    platforms. (Confirmed necessary against the real DB: "Union Station" resolves
+    to the parent.)
   - name → resolve (below); the resolved stop's access set as above.
   - `{lat, lon}` → `searchStopsNear(radius)`; walk = `haversine ÷ 1.3 m/s`.
     Access radius **250 m** (matches the street-transfer radius), fan-out

@@ -1,7 +1,7 @@
 import { type Client } from "@libsql/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildRoutingFixtureDb } from "../test-support.js";
+import { buildFixtureDb, buildRoutingFixtureDb } from "../test-support.js";
 import { accessStops, resolveBothEndpoints, resolveEndpoint } from "./index.js";
 
 describe("access-stop expansion", () => {
@@ -18,6 +18,20 @@ describe("access-stop expansion", () => {
     const byId = Object.fromEntries(access.map((a) => [a.stop.stop_id, a]));
     expect(byId["103"]?.walk_seconds).toBe(0);
     expect(byId["201"]?.walk_seconds).toBe(90);
+  });
+
+  it("expands a station to its boardable platforms, not the parent", async () => {
+    // The catalog fixture: Union Station 9000 (parent) with platform 9001.
+    const stationClient = await buildFixtureDb();
+    try {
+      const access = await accessStops(stationClient, { stop_id: 9000 });
+      const ids = access.map((a) => a.stop.stop_id);
+      expect(ids).toContain("9001");
+      expect(ids).not.toContain("9000");
+      expect(access.every((a) => a.walk_seconds === 0)).toBe(true);
+    } finally {
+      stationClient.close();
+    }
   });
 
   it("snaps a coordinate to nearby stops with sane walk times", async () => {
@@ -55,6 +69,12 @@ describe("endpoint resolution", () => {
     const r = await resolveEndpoint(client, "Distillery");
     expect(r).toMatchObject({ kind: "resolved" });
     if (r.kind === "resolved") expect(r.stop.stop_id).toBe("101");
+  });
+
+  it("not_found for a name that matches no stop", async () => {
+    const r = await resolveEndpoint(client, "Nonexistent Loop");
+    expect(r.kind).toBe("not_found");
+    if (r.kind === "not_found") expect(r.message).toContain("Nonexistent Loop");
   });
 
   it("returns candidates for an ambiguous name", async () => {
@@ -111,9 +131,21 @@ describe("resolveBothEndpoints", () => {
     }
   });
 
-  it("surfaces a not_found endpoint as an error", async () => {
+  it("surfaces a not_found from endpoint as an error", async () => {
     const r = await resolveBothEndpoints(client, "99999", "Distillery");
     expect(r).toMatchObject({ kind: "error" });
-    if (r.kind === "error") expect(r.error.code).toBe("not_found");
+    if (r.kind === "error") {
+      expect(r.error.code).toBe("not_found");
+      expect(r.error.message).toContain("from:");
+    }
+  });
+
+  it("surfaces a not_found to endpoint (when from is fine) as an error", async () => {
+    const r = await resolveBothEndpoints(client, "Distillery", "99999");
+    expect(r).toMatchObject({ kind: "error" });
+    if (r.kind === "error") {
+      expect(r.error.code).toBe("not_found");
+      expect(r.error.message).toContain("to:");
+    }
   });
 });

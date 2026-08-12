@@ -12,6 +12,7 @@ import { registerGetRoute } from "./tools/get-route.js";
 import { registerGetStop } from "./tools/get-stop.js";
 import { registerGetVehicles } from "./tools/get-vehicles.js";
 import { registerListRoutes } from "./tools/list-routes.js";
+import { registerPlanTrip } from "./tools/plan-trip.js";
 import { registerSearchStops } from "./tools/search-stops.js";
 
 export const SERVER_INFO = { name: "ttc-mcp", version: "0.1.0" };
@@ -36,6 +37,7 @@ export function registerTools(server: McpServer, deps: ServerDeps): void {
   registerGetVehicles(server, deps);
   registerGetAlerts(server, deps);
   registerGetArrivals(server, deps);
+  registerPlanTrip(server, deps);
   registerResources(server, deps);
   registerPrompts(server);
 }

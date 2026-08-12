@@ -1,7 +1,12 @@
 import type { Client, InValue } from "@libsql/client";
 
 import type { Mode } from "../../schemas/stop.js";
-import { asText, routeTypeForMode } from "../stops-repository.js";
+import {
+  asText,
+  modeForRouteType,
+  presence,
+  routeTypeForMode,
+} from "../stops-repository.js";
 import type { TransferType } from "../transfers.js";
 
 // The SQL layer for plan_trip's ladder
@@ -16,7 +21,16 @@ export interface Footpath {
   type: TransferType;
 }
 
-/** Outgoing footpaths (transfers) from any of `stopIds`. */
+/**
+ * Outgoing footpaths (transfers) from any of `stopIds`.
+ *
+ * TEMPORARY: excludes `pathway` transfers. The ingested pathway rows carry
+ * Dataset B stop_ids that were never crosswalked to Dataset A, so 91% of them
+ * connect stops kilometres apart and cause plan_trip to "teleport" (issue
+ * #39). Subway in-station interchanges still resolve via `station` transfers
+ * (shared parent_station, flat 60s). Drop this filter once #39 re-ingests
+ * correctly-namespaced pathways.
+ */
 export async function fetchFootpaths(
   client: Client,
   stopIds: readonly number[],
@@ -26,7 +40,8 @@ export async function fetchFootpaths(
   const result = await client.execute({
     sql: `SELECT from_stop_id, to_stop_id, min_walk_seconds, type
           FROM transfers
-          WHERE from_stop_id IN (${placeholders})`,
+          WHERE from_stop_id IN (${placeholders})
+            AND type != 'pathway'`,
     args: [...stopIds],
   });
   return result.rows.map((row) => ({
@@ -138,4 +153,36 @@ export async function fetchDownstream(
     arr: row.arr === null ? null : Number(row.arr),
     dep: row.dep === null ? null : Number(row.dep),
   }));
+}
+
+/** Route metadata for a transit leg: the short name (if present) and the mode
+ * derived from route_type. */
+export interface RouteMeta {
+  route_short_name?: string;
+  mode: Mode;
+}
+
+export async function fetchRouteMeta(
+  client: Client,
+  routeIds: readonly number[],
+): Promise<Map<number, RouteMeta>> {
+  const meta = new Map<number, RouteMeta>();
+  if (routeIds.length === 0) return meta;
+  const placeholders = routeIds.map(() => "?").join(", ");
+  const result = await client.execute({
+    sql: `SELECT route_id, route_short_name, route_type
+          FROM routes
+          WHERE route_id IN (${placeholders})`,
+    args: [...routeIds],
+  });
+  for (const row of result.rows) {
+    const shortName = presence(
+      row.route_short_name === null ? null : asText(row.route_short_name),
+    );
+    meta.set(Number(row.route_id), {
+      ...(shortName !== undefined ? { route_short_name: shortName } : {}),
+      mode: modeForRouteType(Number(row.route_type)),
+    });
+  }
+  return meta;
 }
