@@ -95,6 +95,23 @@ describe("rank helpers", () => {
     ]);
   });
 
+  it("sortByArrival breaks arrival ties by shorter duration", () => {
+    // Same arrival; the one that departs later (shorter ride) ranks first.
+    const longRide = itin(
+      ["1"],
+      "2026-08-04T08:00:00-04:00",
+      "2026-08-04T09:00:00-04:00",
+    ); // 60 min
+    const shortRide = itin(
+      ["2"],
+      "2026-08-04T08:30:00-04:00",
+      "2026-08-04T09:00:00-04:00",
+    ); // 30 min
+    expect(
+      sortByArrival([longRide, shortRide]).map((i) => i.duration_seconds),
+    ).toEqual([1800, 3600]);
+  });
+
   it("sortByLatestDeparture orders by latest departure", () => {
     const earlyDep = itin(
       ["1"],
@@ -109,5 +126,24 @@ describe("rank helpers", () => {
     expect(
       sortByLatestDeparture([earlyDep, lateDep]).map((i) => i.depart_time),
     ).toEqual(["2026-08-04T08:25:00-04:00", "2026-08-04T08:00:00-04:00"]);
+  });
+
+  it("sortByLatestDeparture breaks departure ties by shorter duration", () => {
+    // Same departure; the one that arrives sooner (shorter ride) ranks first.
+    const longRide = itin(
+      ["1"],
+      "2026-08-04T08:00:00-04:00",
+      "2026-08-04T09:00:00-04:00",
+    ); // 60 min
+    const shortRide = itin(
+      ["2"],
+      "2026-08-04T08:00:00-04:00",
+      "2026-08-04T08:30:00-04:00",
+    ); // 30 min
+    expect(
+      sortByLatestDeparture([longRide, shortRide]).map(
+        (i) => i.duration_seconds,
+      ),
+    ).toEqual([1800, 3600]);
   });
 });

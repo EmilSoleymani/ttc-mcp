@@ -282,6 +282,21 @@ describe("planTrip (arrive_by, emulated)", () => {
     ]);
   });
 
+  it("falls back to the anchor when the Δ-probe overshoots the target", async () => {
+    // route 10 runs 101->103 at 08:00 (arr 08:10) and 08:30 (arr 08:40).
+    // Arriving by 08:35: the Δ-probe (target − Δ − slack ≈ 08:05) depart-after
+    // catches the 08:30 trip, which arrives 08:40 — past the target — so the
+    // probe window finds nothing feasible and the emulation falls back to the
+    // anchor's earliest-arrival solve (the 08:00 trip), the correct answer.
+    const itins = await arriveBy("101", "103", "2026-08-04T08:35:00-04:00", 3);
+    expect(itins).toHaveLength(1);
+    expect(itins[0]?.depart_time).toBe("2026-08-04T08:00:00-04:00");
+    expect(itins[0]?.arrive_time).toBe("2026-08-04T08:10:00-04:00");
+    expect(new Date(itins[0]!.arrive_time).getTime()).toBeLessThanOrEqual(
+      new Date("2026-08-04T08:35:00-04:00").getTime(),
+    );
+  });
+
   it("returns [] when nothing can arrive by the target", async () => {
     // Alpha->Beta service starts at 10:00; arriving by 09:00 is impossible.
     expect(
