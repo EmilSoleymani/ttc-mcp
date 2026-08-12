@@ -27,6 +27,12 @@ import {
 // past the requested departure are discarded, bounding the search.
 export const MAX_HORIZON_SECONDS = 6 * 3600;
 
+// The latest GTFS seconds-since-service-midnight a trip realistically uses
+// (TTC night service runs into the high-20:00 hours). A service date can only
+// contribute boardings whose absolute times fall within this span past its
+// midnight — used to skip candidate service days that can't matter.
+const MAX_GTFS_DAY_SECONDS = 30 * 3600;
+
 /** How a stop's best label was reached — the backtrack pointer. */
 export type Parent =
   | { via: "access"; walkSeconds: number }
@@ -59,11 +65,22 @@ export interface LadderParams {
   departMs: number;
   maxTransfers: number;
   modes?: readonly Mode[];
+  /** Destination access stops (with egress walk). When given, the search
+   * target-prunes: any label that can't beat the best-known arrival at the
+   * destination is skipped — a large speedup on long trips, and correctness-
+   * preserving (the optimal path's arrivals are all below that bound). */
+  targetAccess?: readonly OriginAccess[];
 }
 
 interface DatedService {
   date: ServiceDate;
   serviceIds: number[];
+}
+
+/** Mutable best-known arrival at the destination (Infinity until reached),
+ * threaded through the round helpers for target pruning. */
+interface Prune {
+  bestDest: number;
 }
 
 /**
@@ -84,11 +101,32 @@ export async function runLadder(
   const depart = new Date(departMs);
   const day = serviceDateAt(depart);
   const dated: DatedService[] = [];
-  // D-1 (overnight carryover), D, D+1 (a search that crosses midnight).
+  // D-1 (overnight carryover), D, D+1 (a search that crosses midnight) — but
+  // only a date whose trips can actually fall inside [departMs, horizonMs].
+  // For a typical daytime departure this leaves just D, cutting the per-round
+  // boarding queries 3x.
   for (const delta of [-1, 0, 1]) {
     const date = addDays(day, delta);
+    const dayStart = absoluteTimeFor(date, 0).getTime();
+    const dayEnd = dayStart + MAX_GTFS_DAY_SECONDS * 1000;
+    if (dayEnd < departMs || dayStart > horizonMs) continue;
     dated.push({ date, serviceIds: await activeServiceIds(client, date) });
   }
+
+  // Cheapest egress walk per destination access stop, and the running best
+  // arrival at the destination (for target pruning).
+  const targetWalk = new Map<number, number>();
+  for (const a of params.targetAccess ?? []) {
+    const prev = targetWalk.get(a.stopId);
+    if (prev === undefined || a.walk < prev) targetWalk.set(a.stopId, a.walk);
+  }
+  const prune: Prune = { bestDest: Infinity };
+  const noteTarget = (stopId: number, arrivalMs: number): void => {
+    const walk = targetWalk.get(stopId);
+    if (walk === undefined) return;
+    const dest = arrivalMs + walk * 1000;
+    if (dest < prune.bestDest) prune.bestDest = dest;
+  };
 
   const best = new Map<number, Label>();
   for (const a of params.originAccess) {
@@ -99,6 +137,7 @@ export async function runLadder(
         arrival,
         parent: { via: "access", walkSeconds: a.walk },
       });
+      noteTarget(a.stopId, arrival);
     }
   }
   let marked = new Set(best.keys());
@@ -112,12 +151,16 @@ export async function runLadder(
       dated,
       horizonMs,
       params.modes,
+      prune,
+      noteTarget,
     );
     const transferImproved = await relaxFootpaths(
       client,
       transitImproved,
       best,
       horizonMs,
+      prune,
+      noteTarget,
     );
     marked = new Set([...transitImproved, ...transferImproved]);
   }
@@ -134,6 +177,8 @@ async function boardAndRide(
   dated: readonly DatedService[],
   horizonMs: number,
   modes: readonly Mode[] | undefined,
+  prune: Prune,
+  noteTarget: (stopId: number, arrivalMs: number) => void,
 ): Promise<Set<number>> {
   const improved = new Set<number>();
   const markedList = [...marked];
@@ -167,6 +212,8 @@ async function boardAndRide(
     if (boardMs > horizonMs) continue;
     // The boarding must not precede the label we're departing from.
     if (boardMs < best.get(boarding.stop_id)!.arrival) continue;
+    // Can't beat the best-known arrival at the destination.
+    if (boardMs >= prune.bestDest) continue;
 
     const stops = byTrip.get(boarding.trip_id) ?? [];
     const boardRow = stops.find(
@@ -180,7 +227,7 @@ async function boardAndRide(
       const arrSec = s.arr ?? s.dep;
       if (arrSec === null) continue;
       const arrMs = absoluteTimeFor(date, arrSec).getTime();
-      if (arrMs > horizonMs) continue;
+      if (arrMs > horizonMs || arrMs >= prune.bestDest) continue;
       const existing = best.get(s.stop_id);
       if (!existing || arrMs < existing.arrival) {
         best.set(s.stop_id, {
@@ -197,6 +244,7 @@ async function boardAndRide(
             tripId: boarding.trip_id,
           },
         });
+        noteTarget(s.stop_id, arrMs);
         improved.add(s.stop_id);
       }
     }
@@ -211,6 +259,8 @@ async function relaxFootpaths(
   transitImproved: ReadonlySet<number>,
   best: Map<number, Label>,
   horizonMs: number,
+  prune: Prune,
+  noteTarget: (stopId: number, arrivalMs: number) => void,
 ): Promise<Set<number>> {
   const improved = new Set<number>();
   if (transitImproved.size === 0) return improved;
@@ -220,9 +270,10 @@ async function relaxFootpaths(
     const fromLabel = best.get(fp.from_stop_id);
     if (!fromLabel) continue;
     const arrMs = fromLabel.arrival + fp.min_walk_seconds * 1000;
-    if (arrMs > horizonMs) continue;
+    if (arrMs > horizonMs || arrMs >= prune.bestDest) continue;
     const existing = best.get(fp.to_stop_id);
     if (!existing || arrMs < existing.arrival) {
+      noteTarget(fp.to_stop_id, arrMs);
       best.set(fp.to_stop_id, {
         arrival: arrMs,
         parent: {

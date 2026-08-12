@@ -67,6 +67,22 @@ export async function callTool(
   }, deps);
 }
 
+/** Gets an MCP prompt (rendered messages) over a real in-memory client/server
+ * pair. */
+export async function getPrompt(
+  name: string,
+  args: Record<string, string>,
+  deps?: ServerDeps,
+): Promise<{ role: string; text: string }[]> {
+  return withClient(async (client) => {
+    const result = await client.getPrompt({ name, arguments: args });
+    return result.messages.map((m) => ({
+      role: m.role,
+      text: m.content.type === "text" ? m.content.text : "",
+    }));
+  }, deps);
+}
+
 /** Reads an MCP resource over a real in-memory client/server pair. */
 export async function readResource(
   uri: string,

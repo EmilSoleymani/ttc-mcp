@@ -85,15 +85,42 @@ describe("plan_trip", () => {
     expect(dto.error?.code).toBe("no_results");
   });
 
-  it("reports arrive_by as unsupported for now", async () => {
+  it("plans an arrive_by trip (emulated)", async () => {
     const result = await callTool(
       "plan_trip",
-      { from: "101", to: "203", arrive_by: true },
+      {
+        from: "101",
+        to: "103",
+        when: "2026-08-04T08:45:00-04:00",
+        arrive_by: true,
+      },
       deps,
     );
-    expect(result.isError).toBe(true);
+    expect(result.isError).toBe(false);
     const dto = result.structuredContent as PlanDto;
-    expect(dto.error?.code).toBe("unsupported");
+    // Latest departure arriving by 08:45 is the 08:30 trip.
+    expect(dto.itineraries[0]?.depart_time).toBe("2026-08-04T08:30:00-04:00");
+    expect(dto.itineraries[0]?.arrive_time).toBe("2026-08-04T08:40:00-04:00");
+  });
+
+  it("returns multiple distinct alternates up to max_itineraries", async () => {
+    const result = await callTool(
+      "plan_trip",
+      {
+        from: "401",
+        to: "402",
+        when: "2026-08-04T10:00:00-04:00",
+        max_itineraries: 2,
+      },
+      deps,
+    );
+    expect(result.isError).toBe(false);
+    const dto = result.structuredContent as PlanDto;
+    expect(dto.itineraries).toHaveLength(2);
+    const routes = dto.itineraries.map(
+      (i) => i.legs[0]?.type === "transit" && i.legs[0].route_id,
+    );
+    expect(routes).toEqual(["40", "41"]);
   });
 
   it("rejects an invalid `when`", async () => {

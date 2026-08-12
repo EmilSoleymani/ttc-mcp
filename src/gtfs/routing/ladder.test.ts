@@ -62,6 +62,28 @@ describe("runLadder (depart-after)", () => {
     expect(iso(best.get(103))).toBe("2026-08-04T08:40:00-04:00");
   });
 
+  it("target pruning preserves the destination label and never grows the map", async () => {
+    const base = {
+      originAccess: [{ stopId: 101, walk: 0 }],
+      departMs: departAt("2026-08-04T08:00:00-04:00"),
+      maxTransfers: 3,
+    };
+    const unpruned = await runLadder(client, base);
+    const pruned = await runLadder(client, {
+      ...base,
+      targetAccess: [{ stopId: 203, walk: 0 }],
+    });
+    // Same earliest arrival at the destination…
+    expect(iso(pruned.get(203))).toBe(iso(unpruned.get(203)));
+    expect(iso(pruned.get(203))).toBe("2026-08-04T08:30:00-04:00");
+    // …reached via the same path, and pruning only ever drops dominated stops.
+    expect(pruned.get(203)?.parent).toMatchObject({
+      via: "transit",
+      routeId: 20,
+    });
+    expect(pruned.size).toBeLessThanOrEqual(unpruned.size);
+  });
+
   it("a modes filter blocks the bus leg of the two-seat ride", async () => {
     const best = await runLadder(client, {
       originAccess: [{ stopId: 101, walk: 0 }],
