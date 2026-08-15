@@ -83,28 +83,6 @@ async function crosswalkForRtStops(
   return map;
 }
 
-/** stop_name for each of the given static stop ids — the terminal-stop text
- * the unmatched fallback surfaces as "towards <name>". */
-async function stopNames(
-  client: Client,
-  stopIds: number[],
-): Promise<Map<number, string>> {
-  const map = new Map<number, string>();
-  const unique = [...new Set(stopIds)];
-  if (unique.length === 0) return map;
-  const placeholders = unique.map(() => "?").join(", ");
-  const result = await client.execute({
-    sql: `SELECT stop_id, stop_name FROM stops WHERE stop_id IN (${placeholders})`,
-    args: unique,
-  });
-  for (const row of result.rows) {
-    if (row.stop_name !== null && row.stop_name !== undefined) {
-      map.set(Number(row.stop_id), asText(row.stop_name));
-    }
-  }
-  return map;
-}
-
 /** route_id -> route_short_name for the given ids (route_id == route_short_name for TTC). */
 async function routeShortNames(
   client: Client,
@@ -189,15 +167,6 @@ export async function predictedArrivals(
       .map((id) => fullCrosswalk.get(id))
       .filter((id): id is number => id !== undefined);
 
-  // Prefetch the terminal-stop names the unmatched fallback needs.
-  const terminalIds = window
-    .map((p) => {
-      const seq = staticSeqOf(p);
-      return seq.length > 0 ? seq[seq.length - 1] : undefined;
-    })
-    .filter((id): id is number => id !== undefined);
-  const names = await stopNames(client, terminalIds);
-
   const patternCache = new Map<string, RoutePattern[]>();
   const patternsFor = async (route: string): Promise<RoutePattern[]> => {
     const cached = patternCache.get(route);
@@ -217,12 +186,15 @@ export async function predictedArrivals(
 
     let identity = base;
     if (!identity.matched) {
-      const seq = staticSeqOf(pred);
       const match = matchPattern(
-        seq,
+        staticSeqOf(pred),
         await patternsFor(identity.route_id),
         pred.queriedStopId,
       );
+      // No match means the trip is on shared trunk track where even its
+      // direction is undecided. It keeps whatever headsign RT gave (usually
+      // none) and asserts no direction — the arrival still surfaces with its
+      // route and time, which is the never-drop posture (#33).
       if (match) {
         identity = {
           ...identity,
@@ -230,14 +202,6 @@ export async function predictedArrivals(
           direction_id: match.direction_id,
           matched: true,
         };
-      } else if (identity.headsign === "") {
-        // No confident pattern and no RT headsign → name the trip's terminal.
-        const terminal = seq.length > 0 ? seq[seq.length - 1] : undefined;
-        const terminalName =
-          terminal !== undefined ? names.get(terminal) : undefined;
-        if (terminalName !== undefined) {
-          identity = { ...identity, headsign: `towards ${terminalName}` };
-        }
       }
     }
 

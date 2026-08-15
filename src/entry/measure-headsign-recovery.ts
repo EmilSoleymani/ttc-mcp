@@ -29,8 +29,9 @@ interface RecoveryReport {
   trips_with_crosswalked_stops: number;
   recovered: number;
   recovery_pct: number;
-  fallback_terminal_text: number;
-  unrecoverable: number;
+  /** Trips still on shared trunk track, where direction is undecidable. These
+   *  surface with route + time only — no direction, no headsign, no delay. */
+  ambiguous: number;
   sample_recovered: {
     route_id: string;
     headsign: string;
@@ -85,8 +86,7 @@ const patternsFor = async (route: string): Promise<RoutePattern[]> => {
 let tripsWithRoute = 0;
 let tripsWithStops = 0;
 let recovered = 0;
-let fallback = 0;
-let unrecoverable = 0;
+let ambiguous = 0;
 const sampleRecovered: RecoveryReport["sample_recovered"] = [];
 
 for (const u of updates) {
@@ -114,14 +114,7 @@ for (const u of updates) {
       sampleRecovered.push({ route_id: routeId, ...match });
     }
   } else {
-    // The runtime fallback still names the terminal if it crosswalks.
-    const terminal = staticSeq[staticSeq.length - 1]!;
-    const nameRow = await client.execute({
-      sql: "SELECT stop_name FROM stops WHERE stop_id = ?",
-      args: [terminal],
-    });
-    if (nameRow.rows[0]?.stop_name != null) fallback++;
-    else unrecoverable++;
+    ambiguous++;
   }
 }
 
@@ -134,8 +127,7 @@ const report: RecoveryReport = {
     tripsWithStops === 0
       ? 0
       : Math.round((recovered / tripsWithStops) * 1000) / 10,
-  fallback_terminal_text: fallback,
-  unrecoverable,
+  ambiguous,
   sample_recovered: sampleRecovered.map((s) => ({
     route_id: s.route_id,
     headsign: asText(s.headsign),
@@ -150,8 +142,9 @@ console.error(`  with crosswalked stops:     ${String(tripsWithStops)}`);
 console.error(
   `Pattern-matched (recovered):  ${String(recovered)} (${String(report.recovery_pct)}% of crosswalked)`,
 );
-console.error(`Terminal-text fallback:       ${String(fallback)}`);
-console.error(`Unrecoverable (no terminal):  ${String(unrecoverable)}`);
+console.error(
+  `Ambiguous (route + time only): ${String(ambiguous)} — direction undecidable on shared trunk`,
+);
 if (report.sample_recovered.length > 0) {
   console.error("Sample recovered:");
   for (const s of report.sample_recovered) {

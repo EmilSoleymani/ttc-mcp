@@ -28,6 +28,12 @@ export interface RoutePattern {
   direction_id: number;
   /** Ordered by `stop_sequence`. */
   stopIds: number[];
+  /**
+   * How many static trips realise this exact stop sequence. Used to pick a
+   * direction's canonical headsign when the live trip's *branch* is undecided
+   * but its direction is not.
+   */
+  tripCount: number;
 }
 
 /** The identity a confident pattern match recovers. */
@@ -40,12 +46,36 @@ export interface PatternMatch {
 // (crosswalked) stops in order to be considered at all — below it, the RT
 // stop list is too unlike any scheduled pattern to trust.
 export const DEFAULT_COVERAGE_THRESHOLD = 0.6;
-// ...and the winning pattern's coverage must beat the best *disagreeing*
-// pattern (a different headsign/direction) by this margin. This is what keeps
-// a trip still on a route's common trunk — where the two directions or two
-// branches score equally — from being assigned a direction by a coin-flip;
-// such a trip stays unmatched and falls back to terminal-stop text.
+// ...and the winner must beat its best rival by this margin. The test is
+// applied twice, to two independent questions: first to *direction* (a trip
+// still on a route's common trunk, where both directions score equally, is
+// not assigned one by a coin-flip — it stays unmatched), then to *branch*
+// among the patterns of the winning direction. The two are separable far more
+// often than not: on the live feed ~90% of the trips that fail the branch test
+// have every candidate agreeing on direction, so collapsing both questions
+// into one threw away a direction that was never in doubt.
 export const DEFAULT_MARGIN = 0.2;
+
+/**
+ * The most-tripped headsign among `patterns` — the schedule's own canonical
+ * label for a direction. Used when the live trip's direction is settled but
+ * its branch is not: naming the direction's usual destination is the honest
+ * answer, where naming the winning branch's would assert a terminal the trip
+ * may never reach. Ties break on the headsign string for determinism.
+ */
+function canonicalHeadsign(patterns: RoutePattern[]): string | undefined {
+  let best: RoutePattern | undefined;
+  for (const p of patterns) {
+    if (
+      !best ||
+      p.tripCount > best.tripCount ||
+      (p.tripCount === best.tripCount && p.headsign < best.headsign)
+    ) {
+      best = p;
+    }
+  }
+  return best === undefined || best.headsign === "" ? undefined : best.headsign;
+}
 
 /**
  * Distinct stop-sequence patterns for a route, each carrying the headsign /
@@ -86,9 +116,17 @@ export async function loadRoutePatterns(
   const flush = (): void => {
     if (stopIds.length === 0) return;
     const key = stopIds.join(",");
-    if (!byKey.has(key)) {
-      byKey.set(key, { headsign, direction_id: directionId, stopIds });
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.tripCount++;
+      return;
     }
+    byKey.set(key, {
+      headsign,
+      direction_id: directionId,
+      stopIds,
+      tripCount: 1,
+    });
   };
 
   for (const row of result.rows) {
@@ -136,16 +174,26 @@ export function lcsLength(a: number[], b: number[]): number {
 }
 
 /**
- * Best-matching pattern for a live trip's crosswalked stop list, or `null`
- * when no match is confident enough to attribute a direction.
+ * Identity recovered for a live trip's crosswalked stop list, or `null` when
+ * not even its direction can be attributed confidently.
  *
- * A pattern is a candidate only if it actually serves `queriedStopId` (the
- * stop the arrival is for — so the recovered direction is the one relevant to
- * this stop, and a scheduled time is resolvable there). Among candidates,
- * coverage = `lcs(rtStopIds, pattern) / rtStopIds.length`. The winner must
- * clear `threshold` **and** beat the best pattern of a different
- * headsign/direction by `margin`; otherwise the live trip sits on shared track
- * where direction is ambiguous, and we decline to guess.
+ * A pattern is a candidate only if it clears `threshold` coverage
+ * (`lcs(rtStopIds, pattern) / rtStopIds.length`) *and* actually serves
+ * `queriedStopId` — the stop the arrival is for, so the recovered direction is
+ * the one relevant to this stop and a scheduled time is resolvable there.
+ *
+ * Direction and headsign are then decided as two separate questions, because
+ * they fail independently:
+ *
+ *  - **Direction** — the best candidate must beat the best candidate of a
+ *    *different* direction by `margin`. Failing this means the trip is still
+ *    on shared trunk track where both directions score alike, so nothing is
+ *    returned rather than a coin-flip direction.
+ *  - **Branch** — among the winning direction's candidates, the best must beat
+ *    the best candidate carrying a *different headsign* by `margin`. Failing
+ *    this means only the branch is undecided, not the direction, so the
+ *    direction's canonical headsign is returned rather than asserting a
+ *    terminal this trip may never reach.
  */
 export function matchPattern(
   rtStopIds: number[],
@@ -162,19 +210,35 @@ export function matchPattern(
       pattern: p,
       coverage: lcsLength(rtStopIds, p.stopIds) / rtStopIds.length,
     }))
+    .filter((s) => s.coverage >= threshold)
     .sort((a, b) => b.coverage - a.coverage);
 
   const best = scored[0];
-  if (!best || best.coverage < threshold) return null;
+  if (!best) return null;
+  const direction_id = best.pattern.direction_id;
 
-  const identityKey = (m: PatternMatch): string =>
-    `${String(m.direction_id)}\u0000${m.headsign}`;
-  const bestKey = identityKey(best.pattern);
-  const rival = scored.find((s) => identityKey(s.pattern) !== bestKey);
-  if (rival && best.coverage - rival.coverage < margin) return null;
+  // `scored` is sorted descending, so the first rival found is the strongest.
+  const rivalDirection = scored.find(
+    (s) => s.pattern.direction_id !== direction_id,
+  );
+  if (rivalDirection && best.coverage - rivalDirection.coverage < margin) {
+    return null;
+  }
+
+  const sameDirection = scored.filter(
+    (s) => s.pattern.direction_id === direction_id,
+  );
+  const rivalBranch = sameDirection.find(
+    (s) => s.pattern.headsign !== best.pattern.headsign,
+  );
+  const branchUndecided =
+    rivalBranch !== undefined && best.coverage - rivalBranch.coverage < margin;
 
   return {
-    headsign: best.pattern.headsign,
-    direction_id: best.pattern.direction_id,
+    headsign: branchUndecided
+      ? (canonicalHeadsign(sameDirection.map((s) => s.pattern)) ??
+        best.pattern.headsign)
+      : best.pattern.headsign,
+    direction_id,
   };
 }

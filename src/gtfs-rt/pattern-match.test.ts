@@ -37,6 +37,7 @@ describe("loadRoutePatterns", () => {
       headsign: "Aend",
       direction_id: 0,
       stopIds: [101, 102, 103],
+      tripCount: 3,
     });
   });
 
@@ -44,9 +45,16 @@ describe("loadRoutePatterns", () => {
     // Route 20 splits after 202 into two headsigns (110→203, 111→204).
     const patterns = await loadRoutePatterns(db, "20");
     expect(patterns).toHaveLength(2);
-    const byHeadsign = new Map(patterns.map((p) => [p.headsign, p.stopIds]));
-    expect(byHeadsign.get("Broadview Station")).toEqual([201, 202, 203]);
-    expect(byHeadsign.get("Broadview Junction")).toEqual([201, 202, 204]);
+    const byHeadsign = new Map(patterns.map((p) => [p.headsign, p]));
+    expect(byHeadsign.get("Broadview Station")?.stopIds).toEqual([
+      201, 202, 203,
+    ]);
+    expect(byHeadsign.get("Broadview Junction")?.stopIds).toEqual([
+      201, 202, 204,
+    ]);
+    // One trip each — neither branch is the direction's canonical one.
+    expect(byHeadsign.get("Broadview Station")?.tripCount).toBe(1);
+    expect(byHeadsign.get("Broadview Junction")?.tripCount).toBe(1);
   });
 
   it("returns nothing for an unknown or non-numeric route", async () => {
@@ -60,11 +68,13 @@ describe("matchPattern", () => {
     headsign: "Northbound",
     direction_id: 0,
     stopIds: [1, 2, 3, 4, 5],
+    tripCount: 10,
   };
   const south: RoutePattern = {
     headsign: "Southbound",
     direction_id: 1,
     stopIds: [5, 4, 3, 2, 1],
+    tripCount: 10,
   };
 
   it("recovers direction from stop order (a tail of the outbound pattern)", () => {
@@ -79,6 +89,7 @@ describe("matchPattern", () => {
 
   it("returns null when two directions are within the ambiguity margin", () => {
     // A single shared stop is a length-1 subsequence of BOTH patterns → tie.
+    // Direction is genuinely undecidable here, so nothing is returned.
     expect(matchPattern([3], [north, south], 3)).toBeNull();
   });
 
@@ -87,11 +98,13 @@ describe("matchPattern", () => {
       headsign: "Station",
       direction_id: 0,
       stopIds: [201, 202, 203],
+      tripCount: 5,
     };
     const junctionBranch: RoutePattern = {
       headsign: "Junction",
       direction_id: 0,
       stopIds: [201, 202, 204],
+      tripCount: 5,
     };
     // Querying 203 excludes the junction branch (which doesn't serve it), so
     // the live trip resolves unambiguously to the station branch.
@@ -103,21 +116,50 @@ describe("matchPattern", () => {
     expect(match).toEqual({ headsign: "Station", direction_id: 0 });
   });
 
-  it("returns null on the shared trunk where the branch is undecided", () => {
-    const stationBranch: RoutePattern = {
+  describe("when the branch is undecided but the direction is not", () => {
+    // Both branches run direction 0 and tie on the trunk. Direction was never
+    // in doubt, so it is recovered; only the terminal is unknown, and the
+    // direction's canonical (most-tripped) headsign stands in for it.
+    const busyBranch: RoutePattern = {
       headsign: "Station",
       direction_id: 0,
       stopIds: [201, 202, 203],
+      tripCount: 9,
     };
-    const junctionBranch: RoutePattern = {
+    const rareBranch: RoutePattern = {
       headsign: "Junction",
       direction_id: 0,
       stopIds: [201, 202, 204],
+      tripCount: 2,
     };
-    // Only trunk stops seen → both branches tie → decline to guess.
-    expect(
-      matchPattern([201, 202], [stationBranch, junctionBranch], 202),
-    ).toBeNull();
+
+    it("recovers the direction and labels it with the canonical headsign", () => {
+      expect(matchPattern([201, 202], [busyBranch, rareBranch], 202)).toEqual({
+        headsign: "Station",
+        direction_id: 0,
+      });
+    });
+
+    it("breaks a trip-count tie on the headsign string, deterministically", () => {
+      const tied: RoutePattern = { ...rareBranch, tripCount: 9 };
+      expect(matchPattern([201, 202], [busyBranch, tied], 202)).toEqual({
+        headsign: "Junction", // "Junction" < "Station"
+        direction_id: 0,
+      });
+    });
+
+    it("still declines when the tied branches run opposite directions", () => {
+      const opposite: RoutePattern = { ...rareBranch, direction_id: 1 };
+      expect(matchPattern([201, 202], [busyBranch, opposite], 202)).toBeNull();
+    });
+
+    it("keeps the winning branch's own headsign when it clears the margin", () => {
+      // 203 is only on the busy branch, so it wins 1.0 vs 0.67 — over the 0.2
+      // margin, so this trip's actual terminal is named, not the canonical one.
+      expect(
+        matchPattern([201, 202, 203], [busyBranch, rareBranch], 202),
+      ).toEqual({ headsign: "Station", direction_id: 0 });
+    });
   });
 
   it("returns null below the coverage threshold", () => {

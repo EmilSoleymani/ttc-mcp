@@ -97,9 +97,13 @@ describe("predictedArrivals", () => {
     expect(arrivals[0]!.delay_seconds).toBe(90);
   });
 
-  it("falls back to 'towards <terminal>' text with no delay when nothing matches", async () => {
-    // Route 800 has no trips → no patterns → no confident match. The live
-    // trip's terminal (last crosswalked stop, 663) names the direction.
+  it("surfaces route and time only, asserting nothing, when nothing matches", async () => {
+    // Route 800 has no trips → no patterns → no confident match. The arrival
+    // is still surfaced (the never-drop posture), but with no direction and no
+    // delay. Notably it does NOT name the last stop of the RT stop list as a
+    // destination: that stop is wherever the feed's prediction horizon ended,
+    // a mid-route stop ~85% of the time on the live feed, and sometimes the
+    // queried stop itself (#33).
     const rt = fixtureTripUpdatesRtClient([
       {
         routeId: "800",
@@ -120,12 +124,9 @@ describe("predictedArrivals", () => {
       20,
     );
     expect(arrivals).toHaveLength(1);
-    expect(arrivals[0]).toMatchObject({
-      route_id: "800",
-      headsign: "towards Kennedy Station Bus Bay",
-    });
-    // Unmatched → no direction is asserted. The RT feed pins directionId to 0
-    // on every trip, so a 0 here would be a fabricated measurement (#33).
+    expect(arrivals[0]).toMatchObject({ route_id: "800", headsign: "" });
+    // The RT feed pins directionId to 0 on every trip, so a 0 here would be a
+    // fabricated measurement rather than a recovered one.
     expect(arrivals[0]!.direction_id).toBeUndefined();
     expect(arrivals[0]!.delay_seconds).toBeUndefined();
   });
