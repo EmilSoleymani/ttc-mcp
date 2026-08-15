@@ -55,6 +55,136 @@ export async function activeServiceIds(
   return [...active];
 }
 
+// #33 — a live prediction and its scheduled counterpart are the same trip only
+// if their times sit within this window; a nearest scheduled departure further
+// out than this is treated as "no schedule to compare against" and
+// `delay_seconds` is omitted rather than reporting a bogus multi-hour delay.
+const DELAY_MATCH_WINDOW_SECONDS = 2 * 60 * 60;
+
+/**
+ * Above this scheduled headway, one scheduled trip plausibly explains a
+ * prediction and schedule adherence is measurable. At or below it the service
+ * is **frequent** (TTC's own network standard is 10 minutes) and several
+ * scheduled trips explain the prediction equally well — see CONTEXT.md's
+ * "Real-time service quality" and docs/adr/0003.
+ *
+ * Note the ceiling this implies: nearest-departure matching can only ever
+ * express a deviation of ±headway/2, so at the gate itself `delay_seconds`
+ * saturates around ±5 minutes. That is a documented limit of the measure, not
+ * a bug — a route frequent enough to hit it is one where riders ask "how long
+ * until the next" rather than "is it on time".
+ */
+const FREQUENT_SERVICE_HEADWAY_SECONDS = 10 * 60;
+
+/** Half-window each side of the prediction used to characterise the local
+ * headway, so a route that is frequent at rush hour and sparse at night is
+ * judged by the service actually running at the prediction's time of day. */
+const HEADWAY_SAMPLE_WINDOW_SECONDS = 30 * 60;
+
+/** Why `delay_seconds` could not be measured for a live arrival. Mirrors the
+ * `reason` vocabulary carried on `Arrival.unavailable`. */
+export type AdherenceUnavailableReason =
+  "frequent_service" | "no_scheduled_service";
+
+export type ScheduleAdherence =
+  | { kind: "measured"; delaySeconds: number }
+  | { kind: "unavailable"; reason: AdherenceUnavailableReason };
+
+/** Median gap between consecutive departures near `aroundSeconds`. `undefined`
+ * when fewer than two departures fall in the window — too sparse to have a
+ * headway, which is itself proof the service is not frequent. */
+function localHeadwaySeconds(
+  deps: number[],
+  aroundSeconds: number,
+): number | undefined {
+  const near = deps
+    .filter((d) => Math.abs(d - aroundSeconds) <= HEADWAY_SAMPLE_WINDOW_SECONDS)
+    .sort((a, b) => a - b);
+  if (near.length < 2) return undefined;
+  const gaps = near
+    .slice(1)
+    .map((d, i) => d - near[i]!)
+    .sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)];
+}
+
+/**
+ * Schedule adherence for a live arrival: predicted − the nearest scheduled
+ * departure of the same route **and direction** at the same stop (positive =
+ * late). Searches the prediction's service date ±1 day to cover post-midnight
+ * GTFS times.
+ *
+ * The catch this guards is that TTC's live trips are synthetic — there is no
+ * joinable `trip_id` — so "which scheduled trip is this?" is answered
+ * positionally, by proximity. That answer is only trustworthy when the
+ * scheduled trips are far enough apart to tell apart. On frequent service they
+ * are not: a bus 10 minutes late is indistinguishable from the next bus 2
+ * minutes early, and nearest-matching silently reports the latter. So the
+ * headway is checked *before* the deviation is trusted. Gating on the
+ * deviation instead cannot work — it is manufactured by this very function and
+ * is bounded by ±headway/2 by construction, so it always looks plausible.
+ *
+ * The headway costs no extra query: it is derived from the same departure rows
+ * the nearest-match scan already loads.
+ */
+export async function scheduleAdherence(
+  client: Client,
+  stopId: number,
+  routeId: number,
+  directionId: number,
+  predictedEpochSeconds: number,
+): Promise<ScheduleAdherence> {
+  const predictedMs = predictedEpochSeconds * 1000;
+  const today = serviceDateAt(new Date(predictedMs));
+  let nearest: number | undefined;
+  let nearestDeps: number[] = [];
+  let nearestDate: ServiceDate | undefined;
+
+  for (let offset = -1; offset <= 1; offset++) {
+    const date = addDays(today, offset);
+    const serviceIds = await activeServiceIds(client, date);
+    if (serviceIds.length === 0) continue;
+    const placeholders = serviceIds.map(() => "?").join(", ");
+    const result = await client.execute({
+      sql: `SELECT st.dep AS dep
+            FROM stop_times st JOIN trips t ON t.trip_id = st.trip_id
+            WHERE st.stop_id = ? AND t.route_id = ? AND t.direction_id = ?
+              AND t.service_id IN (${placeholders}) AND st.dep IS NOT NULL`,
+      args: [stopId, routeId, directionId, ...serviceIds],
+    });
+    const deps = result.rows.map((row) => Number(row.dep));
+    for (const dep of deps) {
+      const absMs = absoluteTimeFor(date, dep).getTime();
+      const diff = Math.round((predictedMs - absMs) / 1000);
+      if (nearest === undefined || Math.abs(diff) < Math.abs(nearest)) {
+        nearest = diff;
+        nearestDeps = deps;
+        nearestDate = date;
+      }
+    }
+  }
+
+  if (
+    nearest === undefined ||
+    nearestDate === undefined ||
+    Math.abs(nearest) > DELAY_MATCH_WINDOW_SECONDS
+  ) {
+    return { kind: "unavailable", reason: "no_scheduled_service" };
+  }
+
+  // Characterise the service around the *matched* departure, i.e. where the
+  // prediction actually landed on that service day's timeline.
+  const matchedAt = secondsSinceServiceMidnight(
+    nearestDate,
+    new Date(predictedMs),
+  );
+  const headway = localHeadwaySeconds(nearestDeps, matchedAt);
+  if (headway !== undefined && headway <= FREQUENT_SERVICE_HEADWAY_SECONDS) {
+    return { kind: "unavailable", reason: "frequent_service" };
+  }
+  return { kind: "measured", delaySeconds: nearest };
+}
+
 interface RawDeparture {
   stop_id: number;
   dep: number;

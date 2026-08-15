@@ -44,3 +44,33 @@ design (issue #12, `docs/spec/plan-trip.md`).
   via the forward engine, not computed exactly.
 - **Service day** — the GTFS calendar day a trip belongs to, which can run
   past midnight (a `dep` past 24:00 belongs to the prior service day).
+
+## Real-time service quality
+
+Pinned during the `get_arrivals` direction/headsign work (issue #33). The two
+adherence terms are distinct measures, not synonyms, and which one is
+meaningful depends on the **headway**.
+
+- **Headway** — the scheduled gap between consecutive vehicles of a route at a
+  stop, in one direction. A property of the service at a place and time of
+  day, not of any one vehicle.
+- **Frequent service** — service whose headway is short enough that riders
+  arrive at the stop without consulting a timetable (TTC's own network
+  standard is 10 minutes or better). The rider's question is "how long until
+  the next one", never "is it on time".
+- **Schedule adherence** — how far a vehicle's actual or predicted time at a
+  stop deviates from *its own* timetabled time. Positive is late. It is
+  defined only against a **specific scheduled trip**, so it is measurable only
+  when that trip can be identified.
+- **Headway adherence** — how far the actual gap between consecutive vehicles
+  deviates from the scheduled headway. Needs no trip identity, and is the
+  measure that describes bunching on frequent service.
+- **Identifiability** — whether a live prediction can be attributed to one
+  scheduled trip at all. TTC's real-time trips are synthetic (`NEW`, no
+  joinable `trip_id`, no `startTime`), so identity must be inferred
+  positionally; where headway is short, several scheduled trips explain a
+  prediction equally well and schedule adherence is simply not measurable.
+
+> **Not to be confused with:** the `delay` **alert category** in `get_alerts`,
+> which classifies a service *disruption notice* (an incident affecting a
+> route), and has nothing to do with a vehicle's adherence to its timetable.

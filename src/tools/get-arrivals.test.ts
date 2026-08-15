@@ -15,6 +15,7 @@ type Dto = {
   arrivals: Arrival[];
   realtime_available: boolean;
   truncated: boolean;
+  hint?: string;
   error?: { code: string };
 };
 
@@ -53,6 +54,52 @@ describe("get_arrivals", () => {
       source: "predicted",
       realtime: true,
     });
+  });
+
+  it("gives the live path the same truncation advice as the scheduled path", async () => {
+    // Identical truncation used to produce different guidance depending on
+    // which branch served the request — the live path returned `truncated`
+    // with no hint at all.
+    const deps: ServerDeps = {
+      db,
+      rt: fixtureTripUpdatesRtClient(
+        Array.from({ length: 4 }, (_, i) => ({
+          routeId: "900",
+          tripId: `99999${String(i)}`,
+          stopTimeUpdates: [{ stopId: "50662", arrivalSeconds: soon + i * 60 }],
+        })),
+      ),
+    };
+    const result = await callTool(
+      "get_arrivals",
+      { stop_id: "662", limit: 2 },
+      deps,
+    );
+    const dto = result.structuredContent as Dto;
+    expect(dto.realtime_available).toBe(true);
+    expect(dto.truncated).toBe(true);
+    expect(dto.hint).toBe("Narrow with route_id to see fewer results.");
+  });
+
+  it("omits the truncation advice when route_id is already narrowing", async () => {
+    const deps: ServerDeps = {
+      db,
+      rt: fixtureTripUpdatesRtClient(
+        Array.from({ length: 4 }, (_, i) => ({
+          routeId: "900",
+          tripId: `99999${String(i)}`,
+          stopTimeUpdates: [{ stopId: "50662", arrivalSeconds: soon + i * 60 }],
+        })),
+      ),
+    };
+    const result = await callTool(
+      "get_arrivals",
+      { stop_id: "662", route_id: "900", limit: 2 },
+      deps,
+    );
+    const dto = result.structuredContent as Dto;
+    expect(dto.truncated).toBe(true);
+    expect(dto.hint).toBeUndefined();
   });
 
   it("falls back to scheduled for a subway stop (no RT fetch)", async () => {
