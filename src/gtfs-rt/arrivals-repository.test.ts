@@ -123,8 +123,10 @@ describe("predictedArrivals", () => {
     expect(arrivals[0]).toMatchObject({
       route_id: "800",
       headsign: "towards Kennedy Station Bus Bay",
-      direction_id: 0,
     });
+    // Unmatched → no direction is asserted. The RT feed pins directionId to 0
+    // on every trip, so a 0 here would be a fabricated measurement (#33).
+    expect(arrivals[0]!.direction_id).toBeUndefined();
     expect(arrivals[0]!.delay_seconds).toBeUndefined();
   });
 

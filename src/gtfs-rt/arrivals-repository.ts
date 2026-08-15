@@ -264,7 +264,10 @@ export async function predictedArrivals(
           ? { route_short_name: identity.route_short_name }
           : {}),
         headsign: identity.headsign,
-        direction_id: identity.direction_id,
+        // Only a confident identity carries a direction: an unmatched trip's
+        // `direction_id` is the RT feed's hardcoded 0, not a measurement, so it
+        // is omitted rather than asserted (#33).
+        ...(identity.matched ? { direction_id: identity.direction_id } : {}),
         time: toTorontoIso(pred.epoch),
         realtime: true,
         source: "predicted" as const,

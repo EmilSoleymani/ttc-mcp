@@ -3,13 +3,17 @@ import { z } from "zod";
 import { toolErrorSchema } from "../errors.js";
 import { stopSummarySchema } from "./stop.js";
 
-// docs/spec/tool-schemas.md #6. delay_seconds is populated for pattern-matched
-// live arrivals (#33) and omitted otherwise (scheduled, or unmatched live).
+// docs/spec/tool-schemas.md #6. direction_id and delay_seconds are populated
+// for scheduled arrivals (static trip) and for pattern-matched live arrivals
+// (#33); both are omitted for a live trip whose direction the pattern match
+// declined to attribute. The RT feed pins `directionId` to 0 on every trip, so
+// emitting a 0 for an unmatched trip would be indistinguishable from a genuine
+// direction 0 — absent is the only honest answer.
 export const arrivalSchema = z.object({
   route_id: z.string(),
   route_short_name: z.string().optional(),
   headsign: z.string(),
-  direction_id: z.number().int(),
+  direction_id: z.number().int().optional(),
   time: z.string(),
   realtime: z.boolean(),
   source: z.enum(["predicted", "scheduled"]),
