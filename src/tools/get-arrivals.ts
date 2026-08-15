@@ -104,6 +104,13 @@ export function registerGetArrivals(server: McpServer, deps: ServerDeps): void {
               arrivals,
               realtime_available: true,
               truncated,
+              // Same advice the scheduled path gives via getSchedule — the
+              // live branch returned `truncated` without it, so identical
+              // truncation produced different guidance depending on which
+              // branch served the request.
+              ...(truncated && route_id === undefined
+                ? { hint: "Narrow with route_id to see fewer results." }
+                : {}),
             });
           }
         }

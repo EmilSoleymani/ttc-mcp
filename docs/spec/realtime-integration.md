@@ -35,7 +35,7 @@ Arrival { route_id, route_short_name, headsign, direction_id,
           time, realtime: boolean, source: "predicted" | "scheduled",
           delay_seconds? }
 ```
-`delay_seconds` = predicted − scheduled when the scheduled time for that trip/stop is resolvable from the ingested GTFS; omitted otherwise (TTC gives no `delay`). For a **station** id, results are aggregated across child platforms and grouped by direction (ticket 007).
+`delay_seconds` = predicted − the nearest scheduled departure of that route and direction at that stop (TTC gives no `delay` — measured 0/1,840 trip updates). Because TTC's live trips are synthetic, "which scheduled trip is this?" is answered positionally, which only holds where scheduled trips are far enough apart to distinguish: it is emitted only for a pattern-matched trip whose local scheduled headway exceeds 10 minutes, and omitted with a per-arrival `unavailable` reason otherwise. See [ADR 0003](../adr/0003-schedule-adherence-identifiability.md). For a **station** id, results are aggregated across child platforms and grouped by direction (ticket 007).
 
 **Subway / no-live-data fallback (the unified-tool behaviour):** `get_arrivals` looks up the stop's `mode` from the catalog. For a **subway** stop — or any stop with no matching RT trips in the window — it serves the next scheduled departures from the ticket-007 `get_schedule` query path, with `realtime:false`, `source:"scheduled"`. `realtime_available` on the envelope reflects whether *any* RT prediction was found. The tool therefore always answers.
 

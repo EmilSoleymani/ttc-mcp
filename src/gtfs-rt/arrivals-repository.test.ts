@@ -95,6 +95,55 @@ describe("predictedArrivals", () => {
     );
     expect(arrivals).toHaveLength(1);
     expect(arrivals[0]!.delay_seconds).toBe(90);
+    // Nothing was withheld, so the field is absent rather than an empty array.
+    expect(arrivals[0]!.unavailable).toBeUndefined();
+  });
+
+  it("withholds delay_seconds on frequent service, naming the reason", async () => {
+    // Densify route 900 out of stop 662 to a 5-minute headway. Now several
+    // scheduled trips explain the prediction equally well, so the deviation
+    // from the nearest one is not a measurement of anything (#33).
+    const base = 6 * 3600 + 10 * 60;
+    for (let i = 1; i <= 12; i++) {
+      await db.execute({
+        sql: "INSERT INTO trips (trip_id, route_id, service_id, trip_headsign, direction_id) VALUES (?, 900, 1, 'Airport', 0)",
+        args: [9000 + i],
+      });
+      await db.execute({
+        sql: "INSERT INTO stop_times (trip_id, stop_id, stop_sequence, arr, dep) VALUES (?, 662, 1, ?, ?)",
+        args: [9000 + i, base + i * 300, base + i * 300],
+      });
+    }
+    const scheduled662 = Math.floor(
+      new Date("2026-07-24T06:10:00-04:00").getTime() / 1000,
+    );
+    const rt = fixtureTripUpdatesRtClient([
+      {
+        routeId: "900",
+        tripId: "999999",
+        stopTimeUpdates: [
+          { stopId: "50662", arrivalSeconds: scheduled662 + 90 },
+          { stopId: "50663", arrivalSeconds: scheduled662 + 690 },
+        ],
+      },
+    ]);
+    const updates = await rt.getTripUpdates();
+    const { arrivals } = await predictedArrivals(
+      db,
+      updates,
+      [662],
+      undefined,
+      new Date("2026-07-24T06:00:00-04:00"),
+      20,
+    );
+    expect(arrivals).toHaveLength(1);
+    // The identity still resolved, so the direction survives — only adherence
+    // is withheld, and only for the one reason that applies.
+    expect(arrivals[0]!.direction_id).toBe(0);
+    expect(arrivals[0]!.delay_seconds).toBeUndefined();
+    expect(arrivals[0]!.unavailable).toEqual([
+      { field: "delay_seconds", reason: "frequent_service" },
+    ]);
   });
 
   it("surfaces route and time only, asserting nothing, when nothing matches", async () => {
@@ -129,6 +178,13 @@ describe("predictedArrivals", () => {
     // fabricated measurement rather than a recovered one.
     expect(arrivals[0]!.direction_id).toBeUndefined();
     expect(arrivals[0]!.delay_seconds).toBeUndefined();
+    // Both absences are explained, so a client checking either field never has
+    // to infer from the other. Identity failing is reported ahead of any
+    // headway question — that question never got asked.
+    expect(arrivals[0]!.unavailable).toEqual([
+      { field: "direction_id", reason: "unmatched_trip" },
+      { field: "delay_seconds", reason: "unmatched_trip" },
+    ]);
   });
 
   it("skips SKIPPED and NO_DATA stop-time updates", async () => {

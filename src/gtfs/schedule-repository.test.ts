@@ -1,7 +1,7 @@
 import { type Client } from "@libsql/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { getSchedule, scheduledDelaySeconds } from "./schedule-repository.js";
+import { getSchedule, scheduleAdherence } from "./schedule-repository.js";
 import { buildFixtureDb } from "./test-support.js";
 
 describe("schedule repository", () => {
@@ -259,7 +259,7 @@ describe("schedule repository", () => {
   });
 });
 
-describe("scheduledDelaySeconds", () => {
+describe("scheduleAdherence", () => {
   let client: Client;
   beforeEach(async () => {
     client = await buildFixtureDb();
@@ -268,34 +268,106 @@ describe("scheduledDelaySeconds", () => {
     client.close();
   });
 
-  // The fixture schedules route 900 at stop 662 departing 06:10:00 daily.
+  // The fixture schedules route 900 (direction 0) at stop 662 departing
+  // 06:10:00 daily — a lone departure, i.e. as infrequent as service gets.
   const scheduled = Math.floor(
     new Date("2026-07-24T06:10:00-04:00").getTime() / 1000,
   );
 
-  it("reports a positive delay when the prediction is later than schedule", async () => {
-    const delay = await scheduledDelaySeconds(client, 662, 900, scheduled + 90);
-    expect(delay).toBe(90);
+  /** Add `count` extra route-900 departures at stop 662, `gapSeconds` apart,
+   * so the stop has a real headway to characterise. */
+  async function densifyRoute900(
+    gapSeconds: number,
+    count = 12,
+  ): Promise<void> {
+    const base = 6 * 3600 + 10 * 60; // 06:10:00 as seconds since service midnight
+    for (let i = 1; i <= count; i++) {
+      const tripId = 9000 + i;
+      await client.execute({
+        sql: "INSERT INTO trips (trip_id, route_id, service_id, trip_headsign, direction_id) VALUES (?, 900, 1, 'Airport', 0)",
+        args: [tripId],
+      });
+      await client.execute({
+        sql: "INSERT INTO stop_times (trip_id, stop_id, stop_sequence, arr, dep) VALUES (?, 662, 1, ?, ?)",
+        args: [tripId, base + i * gapSeconds, base + i * gapSeconds],
+      });
+    }
+  }
+
+  it("measures a positive delay when the prediction is later than schedule", async () => {
+    expect(
+      await scheduleAdherence(client, 662, 900, 0, scheduled + 90),
+    ).toEqual({ kind: "measured", delaySeconds: 90 });
   });
 
-  it("reports a negative delay when the prediction is earlier (running early)", async () => {
-    const delay = await scheduledDelaySeconds(client, 662, 900, scheduled - 45);
-    expect(delay).toBe(-45);
+  it("measures a negative delay when the prediction is earlier (running early)", async () => {
+    expect(
+      await scheduleAdherence(client, 662, 900, 0, scheduled - 45),
+    ).toEqual({ kind: "measured", delaySeconds: -45 });
   });
 
-  it("omits (undefined) when no scheduled trip is within the match window", async () => {
+  it("reports no_scheduled_service when nothing is within the match window", async () => {
     // Midday: the only scheduled departure (06:10) is hours away.
     const midday = Math.floor(
       new Date("2026-07-24T12:00:00-04:00").getTime() / 1000,
     );
-    expect(
-      await scheduledDelaySeconds(client, 662, 900, midday),
-    ).toBeUndefined();
+    expect(await scheduleAdherence(client, 662, 900, 0, midday)).toEqual({
+      kind: "unavailable",
+      reason: "no_scheduled_service",
+    });
   });
 
-  it("omits when the route does not serve the stop", async () => {
+  it("reports no_scheduled_service when the route does not serve the stop", async () => {
+    expect(await scheduleAdherence(client, 662, 1, 0, scheduled)).toEqual({
+      kind: "unavailable",
+      reason: "no_scheduled_service",
+    });
+  });
+
+  it("reports no_scheduled_service for the direction that does not serve the stop", async () => {
+    // Route 900's fixture trips are all direction 0; nothing runs direction 1.
+    expect(await scheduleAdherence(client, 662, 900, 1, scheduled)).toEqual({
+      kind: "unavailable",
+      reason: "no_scheduled_service",
+    });
+  });
+
+  it("declines on frequent service, where no one scheduled trip is identifiable", async () => {
+    await densifyRoute900(5 * 60); // every 5 minutes
     expect(
-      await scheduledDelaySeconds(client, 662, 1, scheduled),
-    ).toBeUndefined();
+      await scheduleAdherence(client, 662, 900, 0, scheduled + 90),
+    ).toEqual({ kind: "unavailable", reason: "frequent_service" });
+  });
+
+  it("still measures when the headway is above the frequent-service gate", async () => {
+    await densifyRoute900(20 * 60); // every 20 minutes
+    expect(
+      await scheduleAdherence(client, 662, 900, 0, scheduled + 90),
+    ).toEqual({ kind: "measured", delaySeconds: 90 });
+  });
+
+  it("judges the headway local to the prediction, not the whole service day", async () => {
+    // Dense 5-minute service from 06:10, so a 06:11 prediction is on frequent
+    // service...
+    await densifyRoute900(5 * 60, 6); // 06:15 .. 06:40
+    expect(
+      await scheduleAdherence(client, 662, 900, 0, scheduled + 60),
+    ).toEqual({ kind: "unavailable", reason: "frequent_service" });
+    // ...while a lone 09:00 departure hours later is not.
+    await client.execute({
+      sql: "INSERT INTO trips (trip_id, route_id, service_id, trip_headsign, direction_id) VALUES (8888, 900, 1, 'Airport', 0)",
+      args: [],
+    });
+    await client.execute({
+      sql: "INSERT INTO stop_times (trip_id, stop_id, stop_sequence, arr, dep) VALUES (8888, 662, 1, ?, ?)",
+      args: [9 * 3600, 9 * 3600],
+    });
+    const nineAm = Math.floor(
+      new Date("2026-07-24T09:00:30-04:00").getTime() / 1000,
+    );
+    expect(await scheduleAdherence(client, 662, 900, 0, nineAm)).toEqual({
+      kind: "measured",
+      delaySeconds: 30,
+    });
   });
 });

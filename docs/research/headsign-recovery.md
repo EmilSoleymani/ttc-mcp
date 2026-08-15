@@ -85,15 +85,50 @@ headsign is only a weak fallback when no pattern matches at all.
 
 ## `delay_seconds`
 
+Full rationale in
+[ADR 0003](../adr/0003-schedule-adherence-identifiability.md); the short version:
+
 Because the live trip is synthetic (no scheduled counterpart to join), the
-scheduled time is resolved positionally: the nearest scheduled departure of the
-**same route at the same physical stop** to the prediction, searched over the
-prediction's service date ±1 day (to cover post-midnight GTFS times). A single
-stop/platform is served by one direction, so "nearest scheduled departure of
-this route here" already isolates the right scheduled trip without needing the
-(RT-unavailable) trip identity. If nothing scheduled falls within a 2-hour
-window, `delay_seconds` is omitted rather than reporting a bogus delay. It is
-populated **only** for pattern-matched arrivals, per the acceptance criteria.
+scheduled time is resolved positionally — the nearest scheduled departure of the
+same route **and direction** at that stop, searched over the prediction's
+service date ±1 day (to cover post-midnight GTFS times). Positional matching is
+only trustworthy when scheduled trips are far enough apart to tell apart, so
+`delay_seconds` is emitted only when all three hold:
+
+1. the pattern match resolved the trip's direction,
+2. the local scheduled headway (sampled ±30 min around the prediction) is
+   **> 10 minutes** — TTC's own frequent-service threshold, and
+3. something scheduled falls within the 2-hour match window.
+
+Otherwise it is omitted and the arrival carries an `unavailable` entry naming
+the reason. **The gate is on the headway, not on the delay**: the deviation is
+manufactured by nearest-matching and is bounded by ±headway/2 by construction,
+so it always looks plausible — a `|delay| < headway/3` gate still admitted 59.4%
+of frequent-service arrivals in a live sample. The headway itself costs no extra
+query; it comes from the departure rows the nearest-match scan already loads.
+
+Measured coverage across 250 stops: **33.1% measured, 66.6% withheld as
+`frequent_service`, 0.4% as `unmatched_trip`.**
+
+## `unavailable` — why a field is missing
+
+Both `direction_id` and `delay_seconds` can be legitimately absent, for
+different reasons, and on the *same* response different arrivals get different
+answers — 38.0% of multi-route stops mix frequent and infrequent service (at
+stop 85 on Bathurst, route 160 reports a delay and route 7 cannot). So the
+explanation is per-arrival, not per-response:
+
+```jsonc
+"unavailable": [{ "field": "delay_seconds", "reason": "frequent_service" }]
+```
+
+Reasons: `unmatched_trip` (no direction, so nothing to compare against),
+`frequent_service`, `no_scheduled_service`. An unmatched trip emits an entry for
+*both* fields so a client checking one never has to infer from the other, and
+identity failure is reported ahead of any headway question — that question never
+got asked. Live arrivals only: on a scheduled arrival `source`/`realtime`
+already explain the absence. The response-level `hint` stays what it always was
+— advice about changing your query.
 
 ## Honouring `scheduleRelationship`
 
@@ -162,7 +197,7 @@ trunk-ambiguity decline, canonical-headsign fallback, and `delay_seconds`).
 ## Acceptance criteria (from #33)
 
 - [x] `get_arrivals` surfaces `direction_id` + `trip_headsign` for pattern-matched live arrivals (97.0% of live trips — measured above).
-- [x] `get_arrivals` populates `delay_seconds` (predicted − scheduled at the stop) for matched arrivals; omitted when unmatched.
+- [x] `get_arrivals` populates `delay_seconds` (predicted − scheduled at the stop) for matched arrivals where a scheduled trip is identifiable; omitted with a reason otherwise (ADR 0003).
 - [x] Confidence threshold (coverage `0.6`, margin `0.2`) below which `direction_id`, `headsign` and `delay_seconds` are all omitted rather than guessed.
 - [x] Measured headsign-recovery harness + methodology documented (`measure-headsign-recovery`), and run against the live feed.
 - [x] `SKIPPED`/`NO_DATA` stop-time updates are skipped when recovering identity.

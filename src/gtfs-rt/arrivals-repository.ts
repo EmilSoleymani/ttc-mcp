@@ -5,7 +5,7 @@ import GtfsRealtimeBindings from "gtfs-realtime-bindings";
 import type { transit_realtime } from "gtfs-realtime-bindings";
 import type Long from "long";
 
-import { scheduledDelaySeconds } from "../gtfs/schedule-repository.js";
+import { scheduleAdherence } from "../gtfs/schedule-repository.js";
 import { asText } from "../gtfs/stops-repository.js";
 import { getStaticTripById, parseRtTripId } from "../gtfs/trips-repository.js";
 import type { Arrival } from "../schemas/arrival.js";
@@ -205,19 +205,35 @@ export async function predictedArrivals(
       }
     }
 
-    // delay_seconds rides along only with a confident identity (#33): a
-    // scheduled time is trustworthy to diff against once we know which
-    // route/direction the live trip is.
+    // Schedule adherence rides along only with a confident identity (#33):
+    // there is no scheduled trip to diff against until we know which route and
+    // direction the live trip is. Identity failing is reported ahead of any
+    // headway question — that question never got asked.
+    const unavailable: NonNullable<Arrival["unavailable"]> = [];
     let delaySeconds: number | undefined;
-    if (identity.matched) {
+    if (!identity.matched) {
+      unavailable.push(
+        { field: "direction_id", reason: "unmatched_trip" },
+        { field: "delay_seconds", reason: "unmatched_trip" },
+      );
+    } else {
       const routeNum = Number(identity.route_id);
-      if (Number.isInteger(routeNum)) {
-        delaySeconds = await scheduledDelaySeconds(
-          client,
-          pred.queriedStopId,
-          routeNum,
-          pred.epoch,
-        );
+      const adherence = Number.isInteger(routeNum)
+        ? await scheduleAdherence(
+            client,
+            pred.queriedStopId,
+            routeNum,
+            identity.direction_id,
+            pred.epoch,
+          )
+        : ({ kind: "unavailable", reason: "no_scheduled_service" } as const);
+      if (adherence.kind === "measured") {
+        delaySeconds = adherence.delaySeconds;
+      } else {
+        unavailable.push({
+          field: "delay_seconds",
+          reason: adherence.reason,
+        });
       }
     }
 
@@ -236,6 +252,7 @@ export async function predictedArrivals(
         realtime: true,
         source: "predicted" as const,
         ...(delaySeconds !== undefined ? { delay_seconds: delaySeconds } : {}),
+        ...(unavailable.length > 0 ? { unavailable } : {}),
       },
     });
   }
